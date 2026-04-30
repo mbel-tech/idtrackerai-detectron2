@@ -75,7 +75,7 @@ def load_toml(path: Path, name: str | None = None) -> dict:
     try:
         toml_dict = {
             key.lower(): value
-            for key, value in toml.load(path.open(encoding="utf-8")).items()
+            for key, value in toml.loads(path.read_text(encoding="utf-8")).items()
         }
 
         for key, value in toml_dict.items():
@@ -321,7 +321,7 @@ def get_params_from_model_path(
 
     model_params_path = knowledge_transfer_folder / "model_params.json"
     if model_params_path.is_file():
-        model_params_dict = json.load(model_params_path.open())
+        model_params_dict = json.loads(model_params_path.read_text(encoding="utf-8"))
         return get_parameters_from_model_json(model_params_dict)
 
     if model_params_path.with_suffix(".npy").is_file():

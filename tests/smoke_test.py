@@ -624,9 +624,24 @@ def test_idmatcherai(default_video_A, default_video_B):
     assert_files_tree(tree, session_B_path)
     results_path = session_B_path / "matching_results" / "session_default_video_A"
     csv_path = results_path / "csv"
-    assert np.loadtxt(csv_path / "direct_matches.csv", delimiter=",").sum() > 100
-    assert np.loadtxt(csv_path / "indirect_matches.csv", delimiter=",").sum() > 100
-    assert np.loadtxt(csv_path / "joined_matches.csv", delimiter=",").sum() > 100
+    assert (
+        np.loadtxt(
+            csv_path / "direct_matches.csv", delimiter=",", encoding="utf-8"
+        ).sum()
+        > 100
+    )
+    assert (
+        np.loadtxt(
+            csv_path / "indirect_matches.csv", delimiter=",", encoding="utf-8"
+        ).sum()
+        > 100
+    )
+    assert (
+        np.loadtxt(
+            csv_path / "joined_matches.csv", delimiter=",", encoding="utf-8"
+        ).sum()
+        > 100
+    )
 
     assignment = np.loadtxt(
         results_path / "assignments.csv",
@@ -634,6 +649,7 @@ def test_idmatcherai(default_video_A, default_video_B):
         skiprows=1,
         usecols=[0, 1],
         dtype=int,
+        encoding="utf-8",
     )
 
     expected_assignment = np.array(

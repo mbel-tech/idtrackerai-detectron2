@@ -161,7 +161,8 @@ class ListOfGlobalFragments:
         logging.info(f"Saving ListOfGlobalFragments at {path}", stacklevel=2)
         path.parent.mkdir(exist_ok=True)
 
-        json.dump(self.__dict__, path.open("w"), cls=GlobalFragmentsEncoder, indent=4)
+        with path.open("w", encoding="utf-8") as file:
+            json.dump(self.__dict__, file, cls=GlobalFragmentsEncoder, indent=4)
 
     @classmethod
     def load(
@@ -187,7 +188,7 @@ class ListOfGlobalFragments:
             pickle.load(path.with_suffix(".pickle").open("rb")).save(path)
 
         list_of_global_fragments = cls.__new__(cls)
-        json_data = json.load(path.open("r"))
+        json_data = json.loads(path.read_text(encoding="utf-8"))
 
         list_of_global_fragments.global_fragments = [
             GlobalFragment.from_json(g_frag_data, fragments)

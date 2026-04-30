@@ -24,6 +24,11 @@ Changelog
 
 Authors since :ref:`5.0.0`: Jordi Torrents (jordi.torrents@research.fchampalimaud.org | jordi.torrentsm@gmail.com)
 
+6.0.15 (unreleased)
+===================
+
+- Enforce ``utf-8`` in all text I/O operations.
+
 6.0.14
 ======
 

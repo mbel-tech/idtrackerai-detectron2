@@ -350,9 +350,8 @@ class Session:
         dict_to_save.pop("episodes", None)
         dict_to_save.pop("output_dir", None)
         dict_to_save.pop("background_from_segmentation_gui", None)
-        self.path_to_session.write_text(
-            json.dumps(dict_to_save, default=json_default, indent=4)
-        )
+        with self.path_to_session.open("w", encoding="utf-8") as file:
+            json.dump(dict_to_save, file, default=json_default, indent=4)
 
     @classmethod
     def load(

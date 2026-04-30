@@ -117,7 +117,7 @@ class IdCNN(nn.Module):
 
         model_params_path = model_path.parent / "model_params.json"
         if model_params_path.is_file():
-            model_params = json.loads(model_params_path.read_text())
+            model_params = json.loads(model_params_path.read_text(encoding="utf-8"))
             if "version" in model_params:
                 version = tuple(
                     map(int, model_params["version"].split("a")[0].split("."))
@@ -261,7 +261,10 @@ class IdentifierContrastive(IdentifierBase):
         assert path.is_dir()
         cluster_centers = torch.from_numpy(
             np.loadtxt(
-                path / cls.cluster_centers_filename, delimiter=",", dtype=np.float32
+                path / cls.cluster_centers_filename,
+                delimiter=",",
+                dtype=np.float32,
+                encoding="utf-8",
             )
         )
         model = ResNet18.from_file(path / cls.model_weights_filename)
@@ -275,6 +278,7 @@ class IdentifierContrastive(IdentifierBase):
             self.cluster_centers.numpy(force=True),
             fmt="%11.5f",
             delimiter=",",
+            encoding="utf-8",
         )
         return super().save(path)
 

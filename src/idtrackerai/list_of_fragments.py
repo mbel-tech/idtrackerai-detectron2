@@ -103,8 +103,15 @@ class ListOfFragments:
 
         list_of_fragments = cls.__new__(cls)
 
-        with open_track(file_path.with_suffix(".json"), verbose=verbose) as file:
-            json_data: dict = json.load(file)
+        try:
+            with open_track(
+                file_path.with_suffix(".json"), verbose=verbose, encoding="utf-8"
+            ) as file:
+                json_data: dict = json.load(file)
+        except UnicodeDecodeError:
+            # fall back to default encoding
+            with open_track(file_path.with_suffix(".json"), verbose=verbose) as file:
+                json_data: dict = json.load(file)
 
         list_of_fragments.accumulable_individual_fragments = set(
             json_data.get("accumulable_individual_fragments", [])
@@ -240,7 +247,7 @@ class ListOfFragments:
         logging.info(f"Saving ListOfFragments as {file_path}", stacklevel=2)
         file_path.parent.mkdir(exist_ok=True)
 
-        with open_track(file_path, "w") as file:
+        with open_track(file_path, "w", encoding="utf-8") as file:
             json.dump(self, file, cls=FragmentsEncoder, indent=4)
 
     @property

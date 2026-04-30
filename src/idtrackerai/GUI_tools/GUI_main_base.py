@@ -280,7 +280,8 @@ def ensure_desktop_integration(app_name: str, icon_filename: str) -> None:
             "Type=Application\n"
             f"Icon={icon_filename}\n"
             f"StartupWMClass={app_name}\n"
-            "NoDisplay=True\n"
+            "NoDisplay=True\n",
+            encoding="utf-8",
         )
         logging.info(f"Desktop integration installed in {desktop_file_path}")
     except Exception as e:

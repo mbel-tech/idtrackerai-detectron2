@@ -34,7 +34,9 @@ def run_tracker(
         )
         identifier_model.save(session.accumulation_folder)
 
-    with (session.accumulation_folder / "model_params.json").open("w") as file:
+    with (session.accumulation_folder / "model_params.json").open(
+        "w", encoding="utf-8"
+    ) as file:
         json.dump(
             {
                 "n_classes": session.n_animals,

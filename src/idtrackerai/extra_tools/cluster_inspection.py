@@ -151,6 +151,7 @@ def inspect_clusters(
         + ",  t-SNE_1,  t-SNE_2"
         + ", predicted_id, groundtruth_id",
         comments="",
+        encoding="utf-8",
     )
     logging.info(f"Plot and csv saved in {save_folder}")
 

@@ -615,7 +615,8 @@ class ContrastiveLearning:
                     "version": __version__,
                 },
                 indent=4,
-            )
+            ),
+            encoding="utf-8",
         )
         best_score: float = 0
         steps_without_improvement: int = 0

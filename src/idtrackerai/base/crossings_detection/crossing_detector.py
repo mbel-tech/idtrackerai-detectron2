@@ -137,7 +137,9 @@ def detect_crossings(list_of_blobs: ListOfBlobs, session: Session) -> None:
         crossing_model.compile()
         criterion.compile()
 
-    with (session.crossings_detector_folder / "model_params.json").open("w") as file:
+    with (session.crossings_detector_folder / "model_params.json").open(
+        "w", encoding="utf-8"
+    ) as file:
         json.dump(
             {
                 "n_classes": 2,
