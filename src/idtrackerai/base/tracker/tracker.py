@@ -169,15 +169,13 @@ def fragment_identification(
         try:
             identification_cnn = IdCNN.load(
                 session.id_image_size, session.knowledge_transfer_folder
-            ).to(DEVICE)
+            )
         except FileNotFoundError:
             logging.warning(
                 "IdCNN model not found in the knowledge transfer folder "
                 f'"{session.knowledge_transfer_folder}", proceeding with a randomly initialized model'
             )
-            identification_cnn = IdCNN(session.id_image_size, session.n_animals).to(
-                DEVICE
-            )
+            identification_cnn = IdCNN(session.id_image_size, session.n_animals)
         else:
             n_classes, _image_size, _res_reduct = get_params_from_model_path(
                 session.knowledge_transfer_folder
@@ -187,12 +185,11 @@ def fragment_identification(
                     "Ignoring knowledge transfer and proceeding with a randomly initialized model since "
                     "the number of animals is different in the original model and we are working with an IdCNN."
                 )
-                identification_cnn = IdCNN(session.id_image_size, session.n_animals).to(
-                    DEVICE
-                )
+                identification_cnn = IdCNN(session.id_image_size, session.n_animals)
     else:
-        identification_cnn = IdCNN(session.id_image_size, session.n_animals).to(DEVICE)
+        identification_cnn = IdCNN(session.id_image_size, session.n_animals)
 
+    identification_cnn.to(DEVICE)
     if conf.TORCH_COMPILE:
         identification_cnn.compile()
 
