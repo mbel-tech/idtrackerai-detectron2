@@ -154,16 +154,37 @@ class ListOfFragments:
                 )
             )
 
-        new_location = file_path.parent.parent / "identification_images"
-        if new_location != list_of_fragments.id_images_file_paths[0].parent and all(
-            (new_location / file.name).is_file()
-            for file in list_of_fragments.id_images_file_paths
-        ):
-            logging.info("Updating List Of Fragments id_images_file_paths")
-            list_of_fragments.id_images_file_paths = [
-                new_location / file.name
+        if not all(file.is_file() for file in list_of_fragments.id_images_file_paths):
+            n_episodes = max(
+                frag.episodes.max() for frag in list_of_fragments.fragments
+            )
+            new_location = file_path.parent.parent / "identification_images"
+            if all(
+                (new_location / file.name).is_file()
                 for file in list_of_fragments.id_images_file_paths
-            ]
+            ):
+                logging.info(
+                    "Updating the identification images paths keeping the old filenames"
+                )
+                list_of_fragments.id_images_file_paths = [
+                    new_location / file.name
+                    for file in list_of_fragments.id_images_file_paths
+                ]
+            elif all(  # we need this when dealing with Windows paths in Linux systems
+                (new_location / f"id_images_{episode}.h5").is_file()
+                for episode in range(n_episodes + 1)
+            ):
+                logging.info(
+                    "Updating the identification images paths with new filenames"
+                )
+                list_of_fragments.id_images_file_paths = [
+                    new_location / f"id_images_{episode}.h5"
+                    for episode in range(n_episodes + 1)
+                ]
+            else:
+                logging.warning(
+                    f"Not all the identification images were found ({list_of_fragments.id_images_file_paths[0]})"
+                )
 
         return list_of_fragments
 
