@@ -3,6 +3,7 @@ import logging
 from abc import ABC
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import torch
@@ -186,8 +187,16 @@ class IdentifierBase(ABC):
     def compile(self) -> None:
         return self.model.compile()
 
-    def __init__(self, model: nn.Module) -> None:
+    def __init__(
+        self, model: nn.Module, mode: Literal["train", "eval"] = "eval"
+    ) -> None:
         self.model = model
+        if mode == "eval":
+            self.eval()
+        elif mode == "train":
+            self.train()
+        else:
+            raise ValueError(mode)
 
     def eval(self) -> None:
         self.model.eval()
@@ -229,8 +238,13 @@ class IdentifierIdCNN(IdentifierBase):
         return super().save(path)
 
     @classmethod
-    def load(cls, image_size: Sequence[int], model_path: Path):
-        return cls(IdCNN.load(image_size, model_path))
+    def load(
+        cls,
+        image_size: Sequence[int],
+        model_path: Path,
+        mode: Literal["train", "eval"] = "eval",
+    ):
+        return cls(IdCNN.load(image_size, model_path), mode)
 
 
 class IdentifierContrastive(IdentifierBase):
@@ -238,25 +252,42 @@ class IdentifierContrastive(IdentifierBase):
     model_weights_filename: str = "identifier_contrastive.model.pt"
     cluster_centers_filename: str = "identifier_contrastive.cluster_centers.csv"
 
-    def __init__(self, model: nn.Module, cluster_centers):
+    def __init__(
+        self,
+        model: nn.Module,
+        cluster_centers: Tensor,
+        mode: Literal["train", "eval"] = "eval",
+    ):
         super().__init__(model)
         self.cluster_centers = cluster_centers
+        if mode == "eval":
+            self.eval()
+        elif mode == "train":
+            self.train()
+        else:
+            raise ValueError(mode)
 
     def to(self, device: "str | torch.device | int"):
         self.cluster_centers = self.cluster_centers.to(device)
         return super().to(device)
 
     def forward(self, images: Tensor) -> Tensor:
-        embeddings = self.model(images)
-        distances = torch.cdist(embeddings, self.cluster_centers)
+        distances = self.distances_to_cluster_centers(images)
 
         prob = torch.reciprocal(distances + 0.01) ** 7
         prob /= prob.sum(1, keepdim=True)
 
         return prob
 
+    def embed(self, images: Tensor) -> Tensor:
+        return self.model(images)
+
+    def distances_to_cluster_centers(self, images: Tensor) -> Tensor:
+        embeddings = self.embed(images)
+        return torch.cdist(embeddings, self.cluster_centers)
+
     @classmethod
-    def load(cls, path: Path | str):
+    def load(cls, path: Path | str, mode: Literal["train", "eval"] = "eval"):
         path = Path(path)
         assert path.is_dir()
         cluster_centers = torch.from_numpy(
@@ -268,7 +299,7 @@ class IdentifierContrastive(IdentifierBase):
             )
         )
         model = ResNet18.from_file(path / cls.model_weights_filename)
-        return cls(model, cluster_centers)
+        return cls(model, cluster_centers, mode)
 
     def save(self, path: Path | str) -> None:
         path = Path(path)
