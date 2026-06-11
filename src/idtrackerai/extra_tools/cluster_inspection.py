@@ -12,7 +12,6 @@ from scipy.spatial.distance import cdist
 from sklearn.manifold import TSNE
 
 from idtrackerai import IdtrackeraiError, ListOfBlobs, ListOfFragments, conf
-from idtrackerai.base.network import DEVICE, ResNet18, get_onthefly_dataloader
 from idtrackerai.utils import (
     load_trajectories,
     manage_exception,
@@ -44,10 +43,12 @@ def inspect_clusters(
     IdtrackeraiError
         _description_
     """
+    from idtrackerai.base.network import DEVICE, ResNet18, get_onthefly_dataloader
+
     plt.style.use("dark_background")
 
     session_path = resolve_path(session_path)
-    logging.info(f"Computing t-SNE of {session_path}")
+    logging.info(f"Inspecting clusters in {session_path}")
 
     frags = ListOfFragments.load(
         session_path / "preprocessing/list_of_fragments.json", reconnect=False
