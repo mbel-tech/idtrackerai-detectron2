@@ -92,7 +92,7 @@ class VideoGeneratorGUI(GUIBase):
         self.individual_size.setRange(2, 1000)
         self.individual_size.setSingleStep(2)
         self.individual_size.valueChanged.connect(self.individual_size_changed)
-        individual_size_layout.addWidget(QLabel("Individual Size:"))
+        individual_size_layout.addWidget(QLabel("Crop Size:"))
         individual_size_layout.addWidget(self.individual_size)
         self.individual_size_row.setVisible(False)
 
@@ -118,7 +118,7 @@ class VideoGeneratorGUI(GUIBase):
         self.general_trace_length.setRange(0, 1000)
         self.general_trace_length.setValue(20)
         self.general_trace_length.valueChanged.connect(self.video_player.update)
-        general_trace_length_layout.addWidget(QLabel("General Trace Length:"))
+        general_trace_length_layout.addWidget(QLabel("Trace Length:"))
         general_trace_length_layout.addWidget(self.general_trace_length)
 
         self.resize_factor_row = QWidget(self)
@@ -153,11 +153,11 @@ class VideoGeneratorGUI(GUIBase):
         self.controls_widget.setLayout(controls)
         controls.addWidget(video_kind_row, alignment=Qt.AlignmentFlag.AlignHCenter)
         controls.addWidget(QHLine())
-        identity_labels_switch = QToggleSwitch("Draw identity labels")
-        identity_labels_switch.setChecked(True)
-        identity_labels_switch.toggled.connect(self.id_labels.set_labels_enabled)
-        identity_labels_switch.toggled.connect(self.video_player.update)
-        controls.addWidget(identity_labels_switch)
+        self.id_labels_switch = QToggleSwitch("Draw identity labels")
+        self.id_labels_switch.setChecked(True)
+        self.id_labels_switch.toggled.connect(self.id_labels.set_labels_enabled)
+        self.id_labels_switch.toggled.connect(self.video_player.update)
+        controls.addWidget(self.id_labels_switch)
         controls.addWidget(self.id_labels)
         controls.addWidget(QHLine())
         controls.addWidget(self.general_trace_length_row)
@@ -238,7 +238,7 @@ class VideoGeneratorGUI(GUIBase):
                     miniframe_size=self.individual_size.value(),
                     labels=(
                         self.id_labels.get_labels()[1:]
-                        if self.id_labels.isEnabled()
+                        if self.id_labels_switch.isChecked()
                         else None
                     ),
                     callback=progress_callback,
@@ -255,7 +255,7 @@ class VideoGeneratorGUI(GUIBase):
                     resize_factor=self.resize_factor.value() / 100,
                     labels=(
                         self.id_labels.get_labels()[1:]
-                        if self.id_labels.isEnabled()
+                        if self.id_labels_switch.isChecked()
                         else None
                     ),
                     callback=progress_callback,
@@ -407,7 +407,11 @@ class VideoGeneratorGUI(GUIBase):
                 self.resized_trajectories,
                 self.general_trace_length.value(),
                 self.id_labels.get_colors()[0][1:],
-                self.id_labels.get_labels()[1:] if self.id_labels.isEnabled() else None,
+                (
+                    self.id_labels.labels[1:]
+                    if self.id_labels_switch.isChecked()
+                    else None
+                ),
             )
             preview_shape = QRect(0, 0, self.session.width, self.session.height)
 
