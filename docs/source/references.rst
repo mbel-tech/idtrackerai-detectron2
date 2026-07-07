@@ -3,7 +3,7 @@
 References
 ==========
 
-2025 (latest) publication
+2026 (latest) publication
 -------------------------
 
 .. code::
