@@ -14,7 +14,7 @@ install:
 
 checks:
   stage: test
-  image: continuumio/miniconda3:24.1.2-0 # last miniconda with Python <=3.11, Python 3.12 make flake8 conflict with Black
+  image: continuumio/miniconda3:latest
   script:
     - pip install pre-commit
     - pre-commit run --all-files
