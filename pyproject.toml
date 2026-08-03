@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "idtrackerai"
-version = "6.0.14"
+version = "6.0.15a0"
 authors = [
     { name = "Main contact", email = 'info@idtracker.ai' },
     { name = "Jordi Torrents" },
@@ -67,8 +67,7 @@ docs = [
     "pydata_sphinx_theme",
     "sphinx-copybutton",
     "sphinx_design",
-    "sphinx>=5.0,<9.0",
-    # sphinx-toolbox is not compatible with sphinx 9 yet https://github.com/TissueImageAnalytics/tiatoolbox/pull/1050
+    "sphinx",
     "nbsphinx",
     "ipykernel",
     'sphinx-toolbox',

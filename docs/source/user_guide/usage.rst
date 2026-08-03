@@ -346,7 +346,7 @@ You can use the knowledge acquired by the identification model of a previous vid
 Contrastive
 -----------
 
-Since version 6.0.0, idtracker.ai uses contrastive learning as its primary identification algorithm (described in the `2025 eLife publication <https://doi.org/10.7554/eLife.107602>`_). A :wikipedia:`ResNet <Residual_neural_network>` network is trained to map animal images into an embedding space where images of the same individual cluster together. Training uses *positive pairs* (images from the same fragment) and *negative pairs* (images from different, co-existing fragments). As training progresses, the :wikipedia:`silhouette score <Silhouette_(clustering)>` of the resulting clusters rises toward the target threshold.
+Since version 6.0.0, idtracker.ai uses contrastive learning as its primary identification algorithm (described in the `2026 eLife publication <https://doi.org/10.7554/eLife.107602>`_). A :wikipedia:`ResNet <Residual_neural_network>` network is trained to map animal images into an embedding space where images of the same individual cluster together. Training uses *positive pairs* (images from the same fragment) and *negative pairs* (images from different, co-existing fragments). As training progresses, the :wikipedia:`silhouette score <Silhouette_(clustering)>` of the resulting clusters rises toward the target threshold.
 
 Once the target silhouette score is reached (or the patience limit is hit), the embedded images are clustered and identities are assigned. If the accumulated fraction of identified images is sufficient, tracking is complete. Otherwise, the classical accumulation protocol takes over, using the contrastive results as a warm start for idtracker.ai's idCNN.
 

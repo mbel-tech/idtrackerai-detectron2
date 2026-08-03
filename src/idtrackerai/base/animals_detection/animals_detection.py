@@ -131,7 +131,7 @@ def check_segmentation(session: Session, list_of_blobs: ListOfBlobs):
     logging.info(
         f"Saving indices of frames with more blobs than animals in {output_path}"
     )
-    output_path.write_text("\n".join(map(str, error_frames)))
+    output_path.write_text("\n".join(map(str, error_frames)), encoding="utf-8")
 
     if session.check_segmentation:
         list_of_blobs.save(session.blobs_path)

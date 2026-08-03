@@ -111,7 +111,8 @@ def accumulation_step(
                 "ratio_accumulated": accumulation_manager.ratio_accumulated_images,
             },
             indent=4,
-        )
+        ),
+        encoding="utf-8",
     )
 
     if (

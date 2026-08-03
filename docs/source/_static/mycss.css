@@ -28,3 +28,7 @@ a.less-padding {
   padding-bottom: 0.375rem;
   padding-left: 0.3rem;
 }
+
+div.col-lg-3.navbar-header-items__start {
+  width: 20%;
+}

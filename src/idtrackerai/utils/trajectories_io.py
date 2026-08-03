@@ -78,16 +78,13 @@ def _save_trajectories_into_csv(path: Path, data: dict) -> None:
                 header="mean, median, standard_deviation",
                 fmt="%.1f",
                 comments="",
+                encoding="utf-8",
             )
         else:
             attributes_dict[key] = value
 
-    json.dump(
-        attributes_dict,
-        (path / "attributes.json").open("w"),
-        indent=4,
-        default=json_default,
-    )
+    with (path / "attributes.json").open("w", encoding="utf-8") as file:
+        json.dump(attributes_dict, file, indent=4, default=json_default)
 
 
 def _save_trajectories_into_csv_tidy(path: Path, data: dict) -> None:
@@ -131,17 +128,14 @@ def _save_trajectories_into_csv_tidy(path: Path, data: dict) -> None:
         header=header,
         fmt=["%d", "%.3f", "%d", "%.3f", "%.3f", "%.3e"],
         comments="",
+        encoding="utf-8",
     )
 
     attributes = {
         k: v for k, v in data.items() if k not in ("trajectories", "id_probabilities")
     }
-    json.dump(
-        attributes,
-        (path / "attributes_tidy.json").open("w"),
-        indent=4,
-        default=json_default,
-    )
+    with (path / "attributes_tidy.json").open("w", encoding="utf-8") as file:
+        json.dump(attributes, file, indent=4, default=json_default)
 
 
 def _save_trajectories_into_h5(path: Path, data: dict) -> None:
@@ -213,7 +207,15 @@ def _save_array_to_csv(
         time = np.arange(len(array), dtype=float) / fps
         array = np.column_stack((time, array))
 
-    np.savetxt(path, array, delimiter=",", header=array_header, fmt=fmt, comments="")
+    np.savetxt(
+        path,
+        array,
+        delimiter=",",
+        header=array_header,
+        fmt=fmt,
+        comments="",
+        encoding="utf-8",
+    )
 
 
 def _save_trajectories_into_parquet(path: Path, data: dict) -> None:
@@ -376,11 +378,19 @@ def _load_trajectories_from_h5(path: Path) -> dict:
 
 
 def _load_trajectories_from_csv(path: Path) -> dict:
-    out = json.loads((path / "attributes.json").read_text())
+    try:
+        text = (path / "attributes.json").read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        # fall back to default encoding
+        text = (path / "attributes.json").read_text()
+
+    out = json.loads(text)
 
     for array_file in path.glob("*.csv"):
         # read csv without the first column containing time
-        out[array_file.stem] = np.loadtxt(array_file, skiprows=1, delimiter=",")[:, 1:]
+        out[array_file.stem] = np.loadtxt(
+            array_file, skiprows=1, delimiter=",", encoding="utf-8"
+        )[:, 1:]
 
     if "trajectories" in out:
         # reshape trajectories
@@ -394,11 +404,19 @@ def _load_trajectories_from_csv(path: Path) -> dict:
 def _load_trajectories_from_csv_tidy(path: Path) -> dict:
     """Load a tidy CSV file produced by _save_trajectories_into_csv_tidy."""
     attributes_path = path.parent / "attributes_tidy.json"
-    out: dict = (
-        json.loads(attributes_path.read_text()) if attributes_path.exists() else {}
-    )
 
-    data = np.loadtxt(path, delimiter=",", skiprows=1)
+    if attributes_path.exists():
+        try:
+            text = attributes_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # fall back to default encoding
+            text = attributes_path.read_text()
+
+        out: dict = json.loads(text)
+    else:
+        out = {}
+
+    data = np.loadtxt(path, delimiter=",", skiprows=1, encoding="utf-8")
     if data.ndim == 1:
         data = data[np.newaxis, :]
 

@@ -101,7 +101,7 @@ class RunIdTrackerAi:
             log_copy_path = self.session.session_folder / "idtrackerai.log"
             TMP_LOG_FILE.flush()
             TMP_LOG_FILE.seek(0)
-            with open(log_copy_path, "w") as file:
+            with open(log_copy_path, "w", encoding="utf-8") as file:
                 copyfileobj(TMP_LOG_FILE, file)
             logging.info(f"Log file copied to {log_copy_path}")
         return success

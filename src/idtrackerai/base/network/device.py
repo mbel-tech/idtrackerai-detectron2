@@ -28,7 +28,13 @@ def _get_device(user_device: str) -> torch.device:
             return device
     if torch.cuda.is_available():
         device = torch.device("cuda")
-        logging.info('Using Cuda backend with "%s"', torch.cuda.get_device_name(device))
+        device_name = torch.cuda.get_device_name(device)
+
+        if torch.version.hip is not None:
+            logging.info('Using AMD ROCm backend with "%s"', device_name)
+        else:
+            logging.info('Using NVIDIA CUDA backend with "%s"', device_name)
+
         return device
     if mps.is_available():
         logging.info("Using MacOS Metal backend")

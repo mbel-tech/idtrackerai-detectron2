@@ -15,17 +15,17 @@ _idtracker.ai tracks up to 100 unmarked animals from videos recorded in laborato
 This work has been published in [eLife Methods](https://doi.org/10.7554/eLife.107602), please include the following reference if you use this software in your research:
 
 - ```plain
-  Jordi Torrents, Tiago Costa, Gonzalo G de Polavieja. New idtracker.ai: rethinking multi-animal tracking as a representation learning problem to increase accuracy and reduce tracking timese. Life14:RP107602 (2025)
+  Jordi Torrents, Tiago Costa, Gonzalo G de Polavieja. New idtracker.ai: rethinking multi-animal tracking as a representation learning problem to increase accuracy and reduce tracking times. Life14:RP107602 (2026)
   ```
 - ```bibtex
-  @article{idtrackerai_2025,
+  @article{idtrackerai_2026,
             title={New idtracker.ai: rethinking multi-animal tracking as a representation learning problem to increase accuracy and reduce tracking times},
             url={https://doi.org/10.7554/eLife.107602},
             DOI={10.7554/elife.107602},
             publisher={eLife Sciences Publications, Ltd},
             journal={eLife},
             author={Torrents, Jordi and Costa, Tiago and de Polavieja, Gonzalo G},
-            year={2025}
+            year={2026}
           }
   ```
 

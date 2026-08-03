@@ -310,7 +310,7 @@ def match(
 def load_identification_model(model_folder: Path) -> tuple[IdentifierBase, int]:
     params_path = model_folder / "model_params.json"
     if params_path.is_file():
-        params = json.loads(params_path.read_text())
+        params = json.loads(params_path.read_text(encoding="utf-8"))
     elif params_path.with_suffix(".npy").is_file():
         params = np.load(params_path.with_suffix(".npy"), allow_pickle=True).item()
     else:
@@ -355,6 +355,7 @@ def save_matrix(
         mat,
         "%5d" if mat.shape[1] < 20 else "%d",
         delimiter=",",
+        encoding="utf-8",
     )
     fig, ax = plt.subplots(figsize=(6, 5), dpi=200)
     im = ax.imshow(

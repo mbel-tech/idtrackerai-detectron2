@@ -91,14 +91,14 @@ idtracker.ai
         .. image:: _static/elife-white-horizontal-2020.svg
             :class: only-dark
             :target: https://doi.org/10.7554/eLife.107602
-            :alt: idtracker.ai publication in eLife (2025)
+            :alt: idtracker.ai publication in eLife (2026)
             :width: 250
             :align: center
 
         .. image:: _static/elife-full-color-horizontal-2020.svg
             :class: only-light
             :target: https://doi.org/10.7554/eLife.107602
-            :alt: idtracker.ai publication in eLife (2025)
+            :alt: idtracker.ai publication in eLife (2026)
             :width: 250
             :align: center
 
@@ -115,7 +115,7 @@ idtracker.ai
             :expand:
             :class: less-padding
 
-            :fa:`file-text` 2025 (latest) publication
+            :fa:`file-text` 2026 (latest) publication
 
     .. grid-item::
         :columns: 2 1 1 1
