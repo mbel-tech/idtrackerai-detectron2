@@ -1,3 +1,10 @@
+/* Match the theme's responsive `img` sizing for the homepage demo <video> elements */
+video {
+    height: 100%;
+    max-width: 100%;
+    width: auto;
+}
+
 /* https://github.com/pydata/pydata-sphinx-theme/issues/1288 */
 a.my-external-link:after {
     content: var(--pst-icon-external-link);

@@ -22,27 +22,39 @@ idtracker.ai
 
         .. grid-item::
 
-            .. image:: _static/demo_gifs/zebra.webp
-                :alt: Example of zebrafish tracked with idtracker.ai
-                :target: https://youtu.be/Imz3xvPsaEw
+            .. raw:: html
+
+                <a href="https://youtu.be/Imz3xvPsaEw" class="reference external image-reference">
+                <video width="250" height="250" poster="_static/demo_gifs/zebra_poster.jpg" autoplay muted loop playsinline disableremoteplayback aria-label="Example of zebrafish tracked with idtracker.ai">
+                <source src="_static/demo_gifs/zebra.mp4" type="video/mp4">
+                </video></a>
 
         .. grid-item::
 
-            .. image:: _static/demo_gifs/fly.webp
-                :alt: Example of flies tracked with idtracker.ai
-                :target: https://youtu.be/_M9xl4jBzVQ
+            .. raw:: html
+
+                <a href="https://youtu.be/_M9xl4jBzVQ" class="reference external image-reference">
+                <video width="300" height="300" poster="_static/demo_gifs/fly_poster.jpg" autoplay muted loop playsinline disableremoteplayback aria-label="Example of flies tracked with idtracker.ai">
+                <source src="_static/demo_gifs/fly.mp4" type="video/mp4">
+                </video></a>
 
         .. grid-item::
 
-            .. image:: _static/demo_gifs/ants.webp
-                :alt: Example of ants tracked with idtracker.ai
-                :target: https://youtu.be/d0TTdu41NoA
+            .. raw:: html
+
+                <a href="https://youtu.be/d0TTdu41NoA" class="reference external image-reference">
+                <video width="300" height="300" poster="_static/demo_gifs/ants_poster.jpg" autoplay muted loop playsinline disableremoteplayback aria-label="Example of ants tracked with idtracker.ai">
+                <source src="_static/demo_gifs/ants.mp4" type="video/mp4">
+                </video></a>
 
         .. grid-item::
 
-            .. image:: _static/demo_gifs/mice.webp
-                :alt: Example of mice tracked with idtracker.ai
-                :target: https://youtu.be/ANsThSPgBFM
+            .. raw:: html
+
+                <a href="https://youtu.be/ANsThSPgBFM" class="reference external image-reference">
+                <video width="300" height="300" poster="_static/demo_gifs/mice_poster.jpg" autoplay muted loop playsinline disableremoteplayback aria-label="Example of mice tracked with idtracker.ai">
+                <source src="_static/demo_gifs/mice.mp4" type="video/mp4">
+                </video></a>
 
 .. grid:: 1 2 4 4
     :margin: 4 4 0 0
