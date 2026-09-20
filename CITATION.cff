@@ -1,0 +1,154 @@
+cff-version: 1.2.0
+title: idtrackerai-detectron2
+message: >-
+  This repository is a modified version of idtracker.ai. The tracking
+  method is the work of the de Polavieja Lab. If you use this software,
+  please cite their paper (given under preferred-citation) first. Cite
+  this repository in addition only if the Detectron2 segmentation path
+  itself is relevant to what you are reporting.
+type: software
+authors:
+  - family-names: Bellio
+    given-names: Martina
+repository-code: https://github.com/mbel-tech/idtrackerai-detectron2
+url: https://github.com/mbel-tech/idtrackerai-detectron2
+abstract: >-
+  A fork of idtracker.ai that accepts animal outlines from an external
+  instance-segmentation model, such as a fine-tuned Detectron2 Mask
+  R-CNN, in place of its own intensity thresholding. Identity tracking
+  is unchanged: crossing detection, fragmentation, identification and
+  gap closing run exactly as in upstream idtracker.ai.
+keywords:
+  - animal-tracking
+  - instance-segmentation
+  - detectron2
+  - mask-rcnn
+  - idtracker.ai
+  - behavioural-analysis
+  - fish-tracking
+license: GPL-3.0-or-later
+date-released: '2026-09-20'
+
+preferred-citation:
+  type: article
+  title: >-
+    New idtracker.ai: rethinking multi-animal tracking as a
+    representation learning problem to increase accuracy and reduce
+    tracking times
+  authors:
+    - family-names: Torrents
+      given-names: Jordi
+    - family-names: Costa
+      given-names: Tiago
+    - family-names: de Polavieja
+      given-names: Gonzalo G.
+  journal: eLife
+  volume: 14
+  year: 2026
+  doi: 10.7554/eLife.107602
+  url: https://doi.org/10.7554/eLife.107602
+
+references:
+  - type: software
+    title: idtracker.ai
+    abstract: >-
+      The upstream project this repository is derived from.
+    authors:
+      - family-names: Torrents
+        given-names: Jordi
+      - family-names: Romero-Ferrero
+        given-names: Francisco
+      - family-names: Bergomi
+        given-names: Mattia G.
+      - family-names: Heras
+        given-names: Francisco J. H.
+      - family-names: Hinz
+        given-names: Robert C.
+      - family-names: Costa
+        given-names: Tiago
+      - family-names: de Polavieja
+        given-names: Gonzalo G.
+    repository-code: https://gitlab.com/polavieja_lab/idtrackerai
+    url: https://idtracker.ai
+    license: GPL-3.0-or-later
+    version: 6.0.15a0
+
+  - type: article
+    title: >-
+      idtracker.ai: tracking all individuals in small or large
+      collectives of unmarked animals
+    authors:
+      - family-names: Romero-Ferrero
+        given-names: Francisco
+      - family-names: Bergomi
+        given-names: Mattia G.
+      - family-names: Hinz
+        given-names: Robert C.
+      - family-names: Heras
+        given-names: Francisco J. H.
+      - family-names: de Polavieja
+        given-names: Gonzalo G.
+    journal: Nature Methods
+    volume: 16
+    issue: 2
+    start: 179
+    end: 182
+    year: 2019
+    doi: 10.1038/s41592-018-0295-5
+
+  - type: article
+    title: >-
+      idTracker: tracking individuals in a group by automatic
+      identification of unmarked animals
+    authors:
+      - family-names: Pérez-Escudero
+        given-names: Alfonso
+      - family-names: Vicente-Page
+        given-names: Julián
+      - family-names: Hinz
+        given-names: Robert C.
+      - family-names: Arganda
+        given-names: Sara
+      - family-names: de Polavieja
+        given-names: Gonzalo G.
+    journal: Nature Methods
+    volume: 11
+    issue: 7
+    start: 743
+    end: 748
+    year: 2014
+    doi: 10.1038/nmeth.2994
+
+  - type: software
+    title: Detectron2
+    authors:
+      - family-names: Wu
+        given-names: Yuxin
+      - family-names: Kirillov
+        given-names: Alexander
+      - family-names: Massa
+        given-names: Francisco
+      - family-names: Lo
+        given-names: Wan-Yen
+      - family-names: Girshick
+        given-names: Ross
+    repository-code: https://github.com/facebookresearch/detectron2
+    year: 2019
+    license: Apache-2.0
+
+  - type: conference-paper
+    title: Mask R-CNN
+    authors:
+      - family-names: He
+        given-names: Kaiming
+      - family-names: Gkioxari
+        given-names: Georgia
+      - family-names: Dollár
+        given-names: Piotr
+      - family-names: Girshick
+        given-names: Ross
+    collection-title: >-
+      Proceedings of the IEEE International Conference on Computer
+      Vision (ICCV)
+    year: 2017
+    doi: 10.1109/ICCV.2017.322

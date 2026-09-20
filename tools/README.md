@@ -154,6 +154,14 @@ Two further Colab specifics the notebook handles:
 What comes back is tens of MB per clip rather than the gigabytes an enhanced
 video would be.
 
+## Citing
+
+The tracking is idtracker.ai's; the segmentation here is Detectron2's. Cite
+both — see the [repository README](../README.md#citing) for the full list, which
+covers the idtracker.ai papers, Detectron2 and Mask R-CNN. Annotation uses
+[LabelMe](https://github.com/wkentaro/labelme) (Wada, GPL-3.0) and the image
+processing throughout is [OpenCV](https://opencv.org).
+
 ## Installing Detectron2
 
 Only stages 4–6 need it; sampling and conversion run on OpenCV and NumPy alone.

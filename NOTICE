@@ -1,0 +1,107 @@
+idtrackerai-detectron2
+======================
+
+This repository is a modified version of idtracker.ai.
+
+  Upstream project : https://gitlab.com/polavieja_lab/idtrackerai
+  Upstream website : https://idtracker.ai
+  Fork point       : commit 14ff552d209d743e514e8acdeb1590777b9fef98
+                     (master, 2026-08-04), idtracker.ai version 6.0.15a0
+
+idtracker.ai is developed by the de Polavieja Lab at the Champalimaud
+Foundation and is distributed under the GNU General Public License v3.0.
+Copyright in the original work belongs to its authors: Jordi Torrents,
+Francisco Romero-Ferrero, Mattia G. Bergomi, Francisco J. H. Heras,
+Robert C. Hinz, Tiago Costa and Gonzalo G. de Polavieja, among other
+contributors listed in the upstream repository.
+
+This derivative work is distributed under the same licence. See LICENSE
+for the full GPL-3.0 text. The licence is unchanged and the original text
+is included verbatim.
+
+  Copyright (C) 2026 Martina Bellio
+    for the modifications described below.
+
+THIS PROJECT IS NOT AFFILIATED WITH, ENDORSED BY, OR SUPPORTED BY THE
+DE POLAVIEJA LAB OR THE CHAMPALIMAUD FOUNDATION. Please do not report
+problems with this fork to the upstream project. Issues belong here:
+https://github.com/mbel-tech/idtrackerai-detectron2/issues
+
+
+Statement of modifications (GPL-3.0 section 5a)
+-----------------------------------------------
+
+Modified by Martina Bellio, from 2026-09-20.
+
+The purpose of the modification is to let animal outlines produced by an
+external instance-segmentation model (a fine-tuned Detectron2 Mask R-CNN)
+enter idtracker.ai directly, instead of being rendered back into a video
+for idtracker.ai to re-threshold. Identity tracking is deliberately left
+as it was: crossing detection, fragmentation, identification and gap
+closing are unmodified.
+
+Files changed relative to the fork point:
+
+  src/idtrackerai/base/animals_detection/segmentation.py
+      process_frame() takes an optional external contour source and frame
+      number, and short-circuits to contours_from_external() instead of
+      thresholding. New function contours_from_external().
+
+  src/idtrackerai/base/animals_detection/animals_detection.py
+      Validates the contour file against the video before segmenting, and
+      disables background subtraction when external contours are in use.
+
+  src/idtrackerai/session.py
+      New external_contours parameter, resolved and checked in
+      prepare_tracking().
+
+  src/idtrackerai/segmentation_app/main.py
+  src/idtrackerai/segmentation_app/widgets/__init__.py
+  src/idtrackerai/segmentation_app/widgets/frame_analyzer.py
+  src/idtrackerai/segmentation_app/tooltips.toml
+      Segmentation App gains a source selector for choosing between
+      thresholding and external contours.
+
+  pyproject.toml
+      Distribution renamed to idtrackerai-detectron2 to distinguish it
+      from the upstream release. The import name idtrackerai is unchanged.
+
+  README.md
+      Replaced. The upstream README is preserved as README.idtrackerai.md.
+
+Files added:
+
+  src/idtrackerai/base/animals_detection/external_contours.py
+      Sidecar contour format and reader.
+
+  src/idtrackerai/segmentation_app/widgets/segmentation_source.py
+      The segmentation source selector widget.
+
+  tests/external_contours_test.py
+      Tests for the above.
+
+  tools/
+      Pipeline that produces the contour files: frame sampling for
+      annotation, LabelMe to COCO conversion, Mask R-CNN fine-tuning,
+      batch inference, video preflight, and a Colab notebook.
+
+  docs/Automated behaviour tracking workflow.txt
+      Methods write-up for the earlier enhanced-video workflow this
+      replaces.
+
+  NOTICE, CITATION.cff
+      This file and citation metadata.
+
+
+Third-party components used by tools/
+--------------------------------------
+
+The scripts under tools/ depend on, but do not include, the following.
+Each carries its own licence:
+
+  Detectron2   Apache-2.0   https://github.com/facebookresearch/detectron2
+  PyTorch      BSD-3-Clause https://pytorch.org
+  OpenCV       Apache-2.0   https://opencv.org
+  LabelMe      GPL-3.0      https://github.com/wkentaro/labelme
+
+See CITATION.cff and README.md for the papers to cite.

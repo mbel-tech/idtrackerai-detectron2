@@ -4,17 +4,20 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "idtrackerai"
-version = "6.0.15a0"
+# Renamed from "idtrackerai" so this fork is distinguishable from the
+# upstream release. The import name is unchanged, so it cannot be installed
+# alongside upstream idtracker.ai in the same environment.
+name = "idtrackerai-detectron2"
+# Tracks the upstream version this fork is based on, with a local suffix.
+version = "6.0.15a0+detectron2.1"
+# Only the author of this fork's modifications is listed here. The
+# idtracker.ai authors are credited in NOTICE, README.md and CITATION.cff;
+# naming them in package metadata would suggest they maintain this fork or
+# accept contact about it, which they do not.
 authors = [
-    { name = "Main contact", email = 'info@idtracker.ai' },
-    { name = "Jordi Torrents" },
-    { name = "Francisco Romero Ferrero" },
-    { name = "Mattia G. Bergomi" },
-    { name = "Francisco J.H. Heras" },
-    { name = "Gonzalo Polavieja" },
+    { name = "Martina Bellio" },
 ]
-description = "idtracker.ai tracks up to 100 unmarked animals from videos recorded in laboratory conditions using artificial intelligence. Free and open source."
+description = "A fork of idtracker.ai that accepts animal outlines from an external instance-segmentation model, such as a fine-tuned Detectron2 Mask R-CNN, in place of intensity thresholding. Not affiliated with or endorsed by the de Polavieja Lab."
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
@@ -77,10 +80,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://idtracker.ai/"
-Repository = "https://gitlab.com/polavieja_lab/idtrackerai"
-Issues = "https://gitlab.com/polavieja_lab/idtrackerai/-/issues"
-Changelog = "https://idtracker.ai/latest/user_guide/changelog.html"
+Repository = "https://github.com/mbel-tech/idtrackerai-detectron2"
+Issues = "https://github.com/mbel-tech/idtrackerai-detectron2/issues"
+"Upstream project" = "https://gitlab.com/polavieja_lab/idtrackerai"
+"Upstream documentation" = "https://idtracker.ai/"
 
 [tool.setuptools.package-data]
 idtrackerai = [
