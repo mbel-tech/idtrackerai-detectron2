@@ -35,6 +35,7 @@ from .widgets import (
     IntensityThresholds,
     OpenVideoWidget,
     ROIWidget,
+    SegmentationSourceWidget,
     TrackingIntervalsWidget,
 )
 
@@ -69,6 +70,7 @@ class SegmentationGUI(GUIBase):
         self.tracking_interval = TrackingIntervalsWidget(self)
         self.widgets_to_close.append(self.videoPlayer)
 
+        self.segmentation_source = SegmentationSourceWidget()
         self.intensity_thresholds = IntensityThresholds(self, min=0, max=255)
         self.area_thresholds = AreaThresholds()
 
@@ -128,6 +130,9 @@ class SegmentationGUI(GUIBase):
         self.close_and_track_btn.clicked.connect(self.close_and_track_video)
         self.ROI_Widget.valueChanged.connect(self.frame_analyzer.set_ROI_mask)
         self.ROI_Widget.needToDraw.connect(self.videoPlayer.update)
+        self.segmentation_source.valueChanged.connect(
+            self.segmentation_source_changed
+        )
         self.bkg_widget.new_bkg_data.connect(self.frame_analyzer.set_bkg)
         self.bkg_widget.new_bkg_data.connect(self.intensity_thresholds.bkg_changed)
         self.frame_analyzer.new_areas.connect(self.blobInfo.setAreas)
@@ -145,6 +150,8 @@ class SegmentationGUI(GUIBase):
         self.tracking_interval.setToolTip(tooltips["tracking_interval"])
         self.ROI_Widget.setToolTip(tooltips["region_of_interest"])
         self.ROI_Widget.exclusive_rois.setToolTip(tooltips["exclusive_rois"])
+        self.segmentation_source.setToolTip(tooltips["segmentation_source"])
+        self.segmentation_source.browse.setToolTip(tooltips["external_contours"])
         self.bkg_widget.setToolTip(tooltips["background_subtraction"])
         self.bkg_widget.bkg_stat.setToolTip(tooltips["background_stat"])
         self.bkg_widget.view_bkg.setToolTip(tooltips["background_view"])
@@ -172,6 +179,7 @@ class SegmentationGUI(GUIBase):
             self.ROI_Widget,
             QHLine(),
             n_animals_row,
+            self.segmentation_source,
             self.bkg_widget,
             self.intensity_thresholds,
             self.area_thresholds,
@@ -223,6 +231,19 @@ class SegmentationGUI(GUIBase):
             widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         QTimer.singleShot(0, self.load_parameters)
 
+    def segmentation_source_changed(self, path: Path | None) -> None:
+        """Switches the preview, and greys out what the chosen source ignores.
+
+        With external contours neither the intensity thresholds nor the
+        background model take part in segmentation, so leaving them live would
+        suggest they still do something.
+        """
+        external = path is not None
+        self.frame_analyzer.set_external_contours(path)
+        self.intensity_thresholds.setEnabled(not external)
+        self.bkg_widget.setEnabled(not external)
+        self.videoPlayer.update()
+
     def manageDropedPaths(self, paths: Sequence[str]) -> None:
         self.open_widget.process_paths(paths)
 
@@ -231,6 +252,7 @@ class SegmentationGUI(GUIBase):
         self.open_widget.open_video_paths(self.session.video_paths)
         self.tracking_interval.setValue(self.session.tracking_intervals)
         self.ROI_Widget.setValue(self.session.roi_list, self.session.exclusive_rois)
+        self.segmentation_source.setValue(self.session.external_contours)
         self.intensity_thresholds.setValue(self.session.intensity_ths)
         self.area_thresholds.setValue(self.session.area_ths)
         self.n_animals.setValue(self.session.number_of_animals)
@@ -268,6 +290,11 @@ class SegmentationGUI(GUIBase):
 
         logging.info(pprint_dict(parameters, "GUI params"), extra={"markup": True})
         self.session.set_parameters(**parameters)
+        # set_parameters only writes the keys it is given, and out_parameters
+        # leaves this one out when thresholding, so clear it explicitly.
+        # Otherwise switching back to thresholding would silently keep tracking
+        # from a contour file loaded earlier.
+        self.session.external_contours = self.segmentation_source.value()
         bkg = self.bkg_widget.getBkg()
         if bkg is not None:
             tmp_bkg_path = Path(self.session.video_paths[0]).with_suffix(
@@ -302,6 +329,10 @@ class SegmentationGUI(GUIBase):
             "track_wo_identities": self.track_wo_id.isChecked(),
             "roi_list": self.ROI_Widget.getValue(),
         }
+
+        external_contours = self.segmentation_source.value()
+        if external_contours is not None:
+            out["external_contours"] = str(external_contours)
 
         if self.session_name.text():  # put the name at the first position
             out = {"name": self.session_name.text()} | out
@@ -378,6 +409,7 @@ class SegmentationGUI(GUIBase):
             "&".join(Path(path).stem for path in video_paths)
         )
         self.ROI_Widget.set_video_size(video_size)
+        self.segmentation_source.set_video_info(n_frames, video_size)
         self.videoPlayer.setEnabled(False)
         self.tracking_interval.reset(n_frames)
         self.frame_analyzer.drawn_frame = -1
@@ -390,6 +422,9 @@ class SegmentationGUI(GUIBase):
                 widget.setEnabled(True)
             self.enabled = True
             self.videoPlayer.setEnabled(True)
+            # enabling every widget above would also re-enable the threshold
+            # controls, which must stay off while external contours are in use
+            self.segmentation_source_changed(self.segmentation_source.value())
 
         self.setWindowTitle(
             f"Segmentation App | {Path(video_paths[0]).name}"

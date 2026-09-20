@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 from qtpy.QtCore import QPoint, Signal  # type: ignore[reportPrivateImportUsage]
@@ -29,6 +30,16 @@ class FrameAnalyzer(QWidget):
         self.need_to_redraw = True
         self.new_parameters.emit()
 
+    def set_external_contours(self, path: Path | str | None):
+        """Preview contours from an external segmentation model.
+
+        When set, the intensity and area sliders no longer drive segmentation;
+        the outlines drawn are the ones tracking will actually use.
+        """
+        self.external_contours = path
+        self.need_to_redraw = True
+        self.new_parameters.emit()
+
     def set_area_ths(self, area_ths: Sequence[float]):
         self.area_ths = area_ths
         self.need_to_redraw = True
@@ -40,12 +51,13 @@ class FrameAnalyzer(QWidget):
         self.use_bkg = False
         self.bkg_model = None
         self.ROI_mask = None
+        self.external_contours: Path | str | None = None
         self.intensity_ths = [0, 1]
         self.area_ths = [1, 1]
         self.blob_polygons: list[list[QPoint]] = []
         self.drawn_frame = -1
 
-    def process_frame(self, frame: np.ndarray | None):
+    def process_frame(self, frame: np.ndarray | None, frame_number: int = -1):
         if frame is None:  # error frame
             self.areas, contours = [], []
         else:
@@ -55,6 +67,8 @@ class FrameAnalyzer(QWidget):
                 ROI_mask=self.ROI_mask,
                 intensity_ths=self.intensity_ths,
                 area_ths=self.area_ths,
+                external_contours=self.external_contours,
+                frame_number=frame_number,
             )
 
         self.n_blobs = len(contours)
@@ -69,7 +83,7 @@ class FrameAnalyzer(QWidget):
         self, painter: CanvasPainter, frame_number: int, frame: np.ndarray | None
     ):
         if self.drawn_frame != frame_number or self.need_to_redraw:
-            self.process_frame(frame)
+            self.process_frame(frame, frame_number)
             self.new_areas.emit(frame_number, self.areas)
             self.need_to_redraw = False
         painter.setBrush(QColor(60, 160, 255, 150))

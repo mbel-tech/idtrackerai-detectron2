@@ -17,3 +17,5 @@ save_params = "<qt>Save the tracking parameters to a .TOML file for future use o
 close_and_track = "<qt>Close the app and start tracking in the terminal"
 blobs_info = "<qt>Bar plot of the detected blob's areas"
 session_name = "<qt>Name the session. The output folder will be 'session_' followed by this name."
+segmentation_source = "<qt>Choose how animals are found in each frame.<ul><li>'Thresholding' is idtracker.ai's own segmentation, driven by the intensity and area thresholds below</li><li>'External contours' reads outlines precomputed by another model, such as a fine-tuned Detectron2 Mask R-CNN. The intensity thresholds and background subtraction take no part and are disabled; the area thresholds still filter stray detections</li></ul>Everything after segmentation is unchanged: crossing detection, fragmentation and identification run exactly as before."
+external_contours = "<qt>Load an .h5 contour file produced by tools/detectron2_export_contours.py. It is checked against the loaded video, and the file's own record of the model and thresholds that made it is shown as a tooltip."

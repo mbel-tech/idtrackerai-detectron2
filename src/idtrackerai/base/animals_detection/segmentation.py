@@ -20,6 +20,8 @@ from idtrackerai.utils import (
     wrap_entrypoint,
 )
 
+from .external_contours import get_external_contours
+
 
 def segment_episode(
     inputs: tuple[Episode, dict],
@@ -143,7 +145,9 @@ def get_blobs_in_frame(
         # now we use (value, 255)
         segmentation_parameters["intensity_ths"] = (intensity_ths[1], 255)
 
-    _, contours, frame = process_frame(frame, **segmentation_parameters)
+    _, contours, frame = process_frame(
+        frame, frame_number=global_frame_number, **segmentation_parameters
+    )
 
     blobs_in_frame: list[Blob] = []
     for i, contour in enumerate(contours):
@@ -162,9 +166,20 @@ def process_frame(
     area_ths: Sequence[float],
     ROI_mask: np.ndarray | None = None,
     bkg_model: np.ndarray | None = None,
+    external_contours: Path | str | None = None,
+    frame_number: int = -1,
 ) -> tuple[list[int], list[np.ndarray], np.ndarray]:
     # Convert the frame to gray scale
     frame = to_gray_scale(frame)
+
+    if external_contours is not None:
+        # Contours come from an external instance-segmentation model. The frame
+        # is still returned as usual: it is the source of the bounding box
+        # images, so identification images keep the video's own pixels, masked
+        # by the external contour instead of by a threshold.
+        return contours_from_external(
+            external_contours, frame_number, area_ths, ROI_mask, frame
+        )
 
     if bkg_model is None:
         segmented_frame = cv2.inRange(frame, intensity_ths[0], intensity_ths[1])  # type: ignore
@@ -193,6 +208,55 @@ def process_frame(
         if area_ths[0] <= area <= area_ths[1]:
             good_contours.append(np.squeeze(contour))
             areas.append(area)
+    return areas, good_contours, frame
+
+
+def contours_from_external(
+    external_contours: Path | str,
+    frame_number: int,
+    area_ths: Sequence[float],
+    ROI_mask: np.ndarray | None,
+    frame: np.ndarray,
+) -> tuple[list[int], list[np.ndarray], np.ndarray]:
+    """Loads this frame's contours from a sidecar file instead of thresholding.
+
+    The area threshold is still applied, as a guard against stray detections,
+    and so is the ROI. The ROI is applied differently than in the threshold
+    path: there, the ROI clips the binary image and blobs are cut at its edge;
+    here a contour is kept or dropped as a whole, by its centroid, because
+    clipping a polygon would distort the very mask the detector produced.
+    """
+    if frame_number < 0:
+        raise IdtrackeraiError(
+            "External contours need the frame number, but none was given. This"
+            " happens if process_frame() is called without 'frame_number'."
+        )
+
+    contours = get_external_contours(external_contours).contours_in_frame(
+        frame_number
+    )
+
+    areas = []
+    good_contours = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if not area_ths[0] <= area <= area_ths[1]:
+            continue
+
+        if ROI_mask is not None:
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                x, y = M["m10"] / M["m00"], M["m01"] / M["m00"]
+            else:
+                x, y = contour.mean(0)
+            row = min(max(int(round(y)), 0), ROI_mask.shape[0] - 1)
+            col = min(max(int(round(x)), 0), ROI_mask.shape[1] - 1)
+            if not ROI_mask[row, col]:
+                continue
+
+        good_contours.append(contour)
+        areas.append(area)
+
     return areas, good_contours, frame
 
 

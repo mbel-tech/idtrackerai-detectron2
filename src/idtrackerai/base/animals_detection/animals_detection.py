@@ -3,6 +3,7 @@ import logging
 from idtrackerai import IdtrackeraiError, ListOfBlobs, Session
 from idtrackerai.utils import create_dir, remove_dir
 
+from .external_contours import validate_against_video
 from .segmentation import compute_background, load_custom_background, segment
 
 
@@ -16,8 +17,24 @@ def animals_detection_API(session: Session) -> ListOfBlobs:
     else:
         create_dir(session.bbox_images_folder, remove_existing=True)
 
+    if session.external_contours is not None:
+        validate_against_video(
+            session.external_contours,
+            session.number_of_frames,
+            session.width,
+            session.height,
+        )
+
     bkg_model = session.bkg_model
-    if session.use_bkg:
+    if session.external_contours is not None:
+        # The detector already separated the animals from the background, so
+        # there is nothing for a background model to do.
+        bkg_model = None
+        if session.use_bkg:
+            logging.info(
+                "Background subtraction is disabled: external contours are in use"
+            )
+    elif session.use_bkg:
         if bkg_model is None:
             stat = session.background_subtraction_stat
             if stat.lower() in ("median", "mean", "max", "min"):
@@ -45,6 +62,7 @@ def animals_detection_API(session: Session) -> ListOfBlobs:
             "area_ths": session.area_ths,
             "ROI_mask": session.ROI_mask,
             "bkg_model": bkg_model,
+            "external_contours": session.external_contours,
         },
         session.episodes,
         None if session.bounding_box_images_in_ram else session.bbox_images_folder,

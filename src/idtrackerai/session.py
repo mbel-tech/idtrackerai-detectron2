@@ -88,6 +88,12 @@ class Session:
     number_of_animals: int = 0
     intensity_ths: None | Sequence[float] = None
     area_ths: None | Sequence[float] = None
+    external_contours: None | Path | str = None
+    """Path to a sidecar file of contours computed by an external
+    instance-segmentation model (see
+    :mod:`idtrackerai.base.animals_detection.external_contours`). When set,
+    idtracker.ai does not threshold the video: it reads the animals' outlines
+    from this file and runs the rest of the pipeline unchanged."""
     # bkg_model: None | np.ndarray = None
     name: str = ""
     output_dir: Path | None | str = None
@@ -172,6 +178,20 @@ class Session:
         logging.info(
             "Setting video paths to:\n    " + "\n    ".join(map(str, self.video_paths))
         )
+
+        if self.external_contours is not None:
+            self.external_contours = resolve_path(self.external_contours)
+            if not Path(self.external_contours).is_file():
+                raise IdtrackeraiError(
+                    "External contour file not found:"
+                    f" {self.external_contours}"
+                )
+            # Neither threshold segments anything now. area_ths still filters
+            # stray detections, so it keeps its meaning; intensity_ths has none.
+            if self.area_ths is None:
+                self.area_ths = [1, np.inf]
+            if self.intensity_ths is None:
+                self.intensity_ths = [0, 255]
 
         if self.area_ths is None:
             raise IdtrackeraiError("Missing area thresholds parameter")
