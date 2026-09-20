@@ -1,3 +1,20 @@
+> [!IMPORTANT]
+> **You are reading the contributing guide of a fork.**
+>
+> This document is idtracker.ai's own, preserved here because its general
+> guidance is good. But it points at the upstream GitLab issue tracker and at
+> `info@idtracker.ai`, which are **not** the right places for anything about
+> this fork.
+>
+> For problems with the Detectron2 segmentation path, the `tools/` pipeline, or
+> anything else specific to this repository, open an issue at
+> <https://github.com/mbel-tech/idtrackerai-detectron2/issues>.
+>
+> Only report upstream if you can reproduce the problem with unmodified
+> idtracker.ai from <https://gitlab.com/polavieja_lab/idtrackerai>.
+
+---
+
 # Contributing to idtracker.ai
 
 First off, thanks for taking the time to contribute! The following is a set of guidelines for contributing to idtracker.ai. These are mostly guidelines, not rules, use your best judgment 🙂.
