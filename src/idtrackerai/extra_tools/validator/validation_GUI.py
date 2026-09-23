@@ -1,6 +1,6 @@
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -9,7 +9,7 @@ from time import sleep
 import numpy as np
 import toml
 from qtpy.QtCore import Signal  # type: ignore[reportPrivateImportUsage]
-from qtpy.QtCore import Qt, QThread
+from qtpy.QtCore import Qt, QThread, QTimer
 from qtpy.QtGui import QAction, QCloseEvent, QColor, QIcon, QKeyEvent
 from qtpy.QtWidgets import (
     QCheckBox,
@@ -54,12 +54,31 @@ from .widgets import (
     LengthCalibrator,
     MarkMetadata,
     SetupPoints,
+    VideoInfo,
     find_selected_blob,
     paintBlobs,
     paintTrails,
 )
 
 SELECT_POINT_DIST = 300
+
+AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000
+"""How often the Validator saves by itself.
+
+Validation is hours of unrepeatable manual work and nothing else writes it to
+disk, so leaving it entirely to the user to remember Ctrl+S is a poor trade.
+"""
+
+MERGE_PROPAGATION_FRAMES = 100
+"""How far a propagated merge reaches.
+
+A merge is geometric, not an identity edit, so there is no fragment to bound
+it: it would otherwise run to the end of the video, merging blobs long after
+the two parts stopped belonging to the same animal.
+"""
+
+UNDO_DEPTH = 20
+"""Edits kept on the undo stack. Snapshots live in RAM, hence a limit."""
 
 
 class WarningRedirector(logging.Handler):
@@ -74,6 +93,102 @@ class WarningRedirector(logging.Handler):
         )
 
 
+class IdentitiesSnapshot:
+    """The user-generated identities and centroids of a set of blobs.
+
+    This is everything an identity edit can change, so restoring it undoes one.
+    The blobs themselves are referenced, not copied; only the two small lists
+    each one carries are duplicated.
+    """
+
+    def __init__(self, blobs: Iterable[Blob]) -> None:
+        self.entries = [
+            (
+                blob,
+                (
+                    None
+                    if blob.user_generated_identities is None
+                    else list(blob.user_generated_identities)
+                ),
+                (
+                    None
+                    if blob.user_generated_centroids is None
+                    else list(blob.user_generated_centroids)
+                ),
+            )
+            for blob in blobs
+        ]
+
+    def restore(self) -> None:
+        for blob, identities, centroids in self.entries:
+            blob.user_generated_identities = (
+                None if identities is None else list(identities)
+            )
+            blob.user_generated_centroids = (
+                None if centroids is None else list(centroids)
+            )
+
+
+class FramesSnapshot:
+    """Which blobs were in which frames, plus what those blobs held.
+
+    Merging and extending add and remove whole blobs, so restoring identities
+    is not enough: the frame's blob list has to come back as well. Taking both
+    keeps a single snapshot type sufficient for any structural edit.
+    """
+
+    def __init__(self, blobs: ListOfBlobs, frames: Iterable[int]) -> None:
+        self.blobs = blobs
+        self.frames = {frame: list(blobs.blobs_in_video[frame]) for frame in frames}
+        self.identities = IdentitiesSnapshot(
+            blob for blobs_in_frame in self.frames.values() for blob in blobs_in_frame
+        )
+
+    def restore(self) -> None:
+        for frame, blobs_in_frame in self.frames.items():
+            self.blobs.blobs_in_video[frame] = list(blobs_in_frame)
+        self.identities.restore()
+
+
+class UndoManager:
+    """A bounded stack of undoable Validator edits.
+
+    In-memory and per-run: closing the Validator discards it. It exists because
+    a mis-aimed propagated edit used to mean reloading the session and losing
+    everything done since the last save.
+    """
+
+    def __init__(self, gui: "ValidationGUI") -> None:
+        self.gui = gui
+        self.stack: list[tuple[str, IdentitiesSnapshot | FramesSnapshot]] = []
+
+    def push_identities(self, description: str, blobs: Iterable[Blob]) -> None:
+        """Records an edit that only changes identities and centroids."""
+        self._push(description, IdentitiesSnapshot(blobs))
+
+    def push_frames(self, description: str, frames: Iterable[int]) -> None:
+        """Records an edit that adds or removes blobs in `frames`."""
+        self._push(description, FramesSnapshot(self.gui.blobs, frames))
+
+    def _push(
+        self, description: str, snapshot: IdentitiesSnapshot | FramesSnapshot
+    ) -> None:
+        self.stack.append((description, snapshot))
+        del self.stack[:-UNDO_DEPTH]
+
+    def undo(self) -> None:
+        if not self.stack:
+            self.gui.light_popup.info("Undo", "Nothing to undo")
+            return
+
+        description, snapshot = self.stack.pop()
+        snapshot.restore()
+        # An edit can have been propagated anywhere along a fragment, and the
+        # snapshot does not record how far, so the whole video is recomputed.
+        self.gui.update_trajectories_range(0, self.gui.n_frames)
+        self.gui.light_popup.info("Undo", f"Undid: {description}")
+
+
 class DblClickDialog(QDialog):
     class Answers(Enum):
         Cancel = 0
@@ -81,6 +196,9 @@ class DblClickDialog(QDialog):
         Interpolate = 2
         Reset = 3
         Remove = 4
+        Swap = 5
+        Extend = 6
+        Merge = 7
 
     def __init__(self, parent: QWidget, n_animals: int) -> None:
         super().__init__(parent)
@@ -111,6 +229,29 @@ class DblClickDialog(QDialog):
         second_btn_row.addWidget(self.interp_btn)
         second_btn_row.addWidget(cancel_btn)
         change_id_btn.setDefault(True)
+
+        swap_btn = QPushButton(get_icon("refresh"), "Swap with...")
+        swap_btn.setToolTip(
+            "Exchange this identity with another one, instead of renaming it"
+        )
+        extend_btn = QPushButton(get_icon("add"), "Extend...")
+        extend_btn.setToolTip(
+            "Repeat this centroid over the next frames, for an animal that"
+            " stopped being detected while barely moving"
+        )
+        merge_btn = QPushButton(get_icon("add"), "Merge with...")
+        merge_btn.setToolTip(
+            "Rebuild one blob from this one and another, for an animal that"
+            " segmentation split in two"
+        )
+
+        first_btn_row.addWidget(swap_btn)
+        second_btn_row.addWidget(extend_btn)
+        second_btn_row.addWidget(merge_btn)
+
+        swap_btn.clicked.connect(lambda: self.done(self.Answers.Swap.value))
+        extend_btn.clicked.connect(lambda: self.done(self.Answers.Extend.value))
+        merge_btn.clicked.connect(lambda: self.done(self.Answers.Merge.value))
 
         cancel_btn.clicked.connect(lambda: self.done(self.Answers.Cancel.value))
         change_id_btn.clicked.connect(lambda: self.done(self.Answers.ChangeId.value))
@@ -194,19 +335,59 @@ class SaveSessionObjects(QThread):
     "Original file of loaded ListOfBlobs. Validated list will be saved in the same location"
 
     def __init__(
-        self, session: Session, blobs: ListOfBlobs, parent: QWidget, loaded_from: Path
+        self,
+        session: Session,
+        blobs: ListOfBlobs,
+        parent: QWidget,
+        loaded_from: Path,
+        verbose: bool = True,
     ) -> None:
         super().__init__(parent)
         self.session = session
         self.loaded_from = loaded_from
         self.blobs = blobs
+        self.verbose = verbose
+        self.success = True
+        self.error_message: str | None = None
+        self.backup_path: Path | None = None
+        "Where the session went instead, if the normal location was unwritable."
 
     def run(self) -> None:
         # when loading light session from CLI, the main windows remains out of focus.
         # This sleeps fixes it, not beautiful but it works...
         sleep(0.1)
-        self.session.save()
-        self.blobs.save(self.loaded_from)
+        try:
+            self.session.save()
+            self.blobs.save(self.loaded_from, verbose=self.verbose)
+        except Exception as exc:  # noqa: BLE001 - reported, then salvaged below
+            self.success = False
+            self.error_message = str(exc)
+            logging.error("Failed to save the session: %s", exc)
+            self.save_backup()
+
+    def save_backup(self) -> None:
+        """Writes the session somewhere local after the real save failed.
+
+        Session folders live on network drives and synced folders that go away
+        without warning. Hours of validation are held only in memory, so a
+        failed save has to land somewhere rather than raise and lose them.
+        """
+        backup_dir = Path.home() / "idtrackerai_backups" / self.session.name
+        original_folder = self.session.session_folder
+        try:
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            # Session.save() takes no path; redirecting it means moving the
+            # folder it derives the path from, and putting it back afterwards.
+            self.session.session_folder = backup_dir
+            self.session.save()
+            self.blobs.save(backup_dir / "list_of_blobs.pickle", verbose=self.verbose)
+        except Exception as exc:  # noqa: BLE001 - nothing left to fall back to
+            logging.error("The backup save also failed: %s", exc)
+        else:
+            self.backup_path = backup_dir
+            logging.info("Session backed up to %s", backup_dir)
+        finally:
+            self.session.session_folder = original_folder
 
 
 class ValidationGUI(GUIBase):
@@ -217,11 +398,19 @@ class ValidationGUI(GUIBase):
 
         # TODO logging.getLogger().addHandler(WarningRedirector(self))
         self.light_popup = LightPopUp()
+        self.undo_manager = UndoManager(self)
+        self.saving_session_thread: SaveSessionObjects | None = None
+        self.save_thread: SaveTrajectoriesThread | None = None
         self.setWindowTitle("Validator")
         self.documentation_url = "https://idtracker.ai/latest/user_guide/validator.html"
 
         self.video_player = VideoPlayer(self)
         self.widgets_to_close.append(self.video_player)
+
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setInterval(AUTOSAVE_INTERVAL_MS)
+        self.autosave_timer.timeout.connect(self.autosave)
+        self.autosave_timer.start()
 
         self.video_player.canvas.click_event.connect(self.click_on_canvas)
         self.video_player.canvas.double_click_event.connect(self.double_click_on_canvas)
@@ -240,6 +429,7 @@ class ValidationGUI(GUIBase):
         self.mark_metadata.needToDraw.connect(self.video_player.update)
 
         self.interpolator = Interpolator()
+        self.interpolator.undo_manager = self.undo_manager
         self.interpolator.need_to_draw.connect(self.video_player.update)
         self.interpolator.update_trajectories.connect(self.update_trajectories_range)
         self.interpolator.go_to_frame.connect(self.video_player.setCurrentFrame)
@@ -251,6 +441,7 @@ class ValidationGUI(GUIBase):
         self.id_labels = IdLabels()
         self.id_labels.needToDraw.connect(self.video_player.update)
         self.id_labels.needToDraw.connect(new_changes)
+        self.id_labels.presenceIntervalRequested.connect(self.set_identity_presence)
 
         self.setup_points = SetupPoints()
         self.setup_points.needToDraw.connect(self.video_player.update)
@@ -262,7 +453,10 @@ class ValidationGUI(GUIBase):
 
         self.video_player.canvas.click_event.connect(self.setup_points.click_event)
         self.video_player.canvas.click_event.connect(self.length_calibrator.click_event)
+        self.video_player.canvas.move_event.connect(self.length_calibrator.move_event)
         self.video_player.canvas.click_event.connect(self.interpolator.click_event)
+
+        self.video_info = VideoInfo()
 
         right_splitter = QSplitter(Qt.Orientation.Vertical)
         right_splitter.setContentsMargins(8, 0, 0, 0)
@@ -276,6 +470,7 @@ class ValidationGUI(GUIBase):
         tabs.addTab(self.setup_points, "Setup Points")
         tabs.addTab(self.length_calibrator, "Length Calibration")
         tabs.addTab(self.mark_metadata, "Mark Metadata")
+        tabs.addTab(self.video_info, "Video Info")
         TransparentDisabledOverlay(
             "Disable the Interpolator to\nenable these extra tools", tabs
         )
@@ -487,10 +682,103 @@ class ValidationGUI(GUIBase):
             self, "Find error", f"Identity {identity_to_find} not found in this frame"
         )
 
+    def set_identity_presence(self, identity: int) -> None:
+        """Asks for the frame range in which `identity` is present.
+
+        Everything outside it stops counting as a "Miss id" error. See
+        `Session.presence_intervals`.
+        """
+        intervals = self.session.presence_intervals.get(
+            str(identity), [[0, self.n_frames - 1]]
+        )
+        start, end = intervals[0]
+
+        text, ok = QInputDialog.getText(
+            self,
+            f"Set presence for identity {identity}",
+            f"Frame range in which identity {identity} is present (start-end):",
+            text=f"{start}-{end}",
+        )
+        if not ok or not text:
+            return
+
+        try:
+            start_text, end_text = text.split("-")
+            start, end = int(start_text), int(end_text)
+            if not 0 <= start < end < self.n_frames:
+                raise ValueError(text)
+        except ValueError:
+            QMessageBox.warning(
+                self,
+                "Invalid frame range",
+                f"Write two frame numbers as start-end, between 0 and"
+                f" {self.n_frames - 1}, for instance 0-{self.n_frames - 1}.",
+            )
+            return
+
+        # Rebound rather than mutated: Session is a plain class and the empty
+        # default dict is shared between instances.
+        self.session.presence_intervals = {
+            **self.session.presence_intervals,
+            str(identity): [[start, end]],
+        }
+        self.unsaved_changes = True
+        self.errorsExplorer.update_list_of_errors()
+        logging.info("Identity %s is present from frame %s to %s", identity, start, end)
+
+    def blobs_reachable_by_propagation(self, blob: Blob) -> list[Blob]:
+        """The blobs a propagated identity edit on `blob` can reach.
+
+        Propagation stops at the edges of a fragment, so that is the whole
+        extent of what needs snapshotting before one. A blob added by the user,
+        or a session whose fragments never loaded, has no fragment to follow.
+        """
+        if self.fragments is None or blob.fragment_identifier < 0:
+            return [blob]
+
+        fragment = self.fragments[blob.fragment_identifier]
+        return [
+            candidate
+            # end_frame is exclusive
+            for frame in range(fragment.start_frame, fragment.end_frame)
+            for candidate in self.blobs.blobs_in_video[frame]
+            if candidate.fragment_identifier == fragment.identifier
+        ]
+
     def keyPressEvent(self, a0: QKeyEvent) -> None:
         if a0.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.id_groups.uncheck_edit_buttons()
             self.setup_points.add.setChecked(False)
+        elif a0.key() == Qt.Key.Key_Z and a0.modifiers() == (
+            Qt.KeyboardModifier.ControlModifier
+        ):
+            self.undo_manager.undo()
+        elif a0.key() == Qt.Key.Key_I:
+            self.start_interpolation_from_selection()
+
+    def start_interpolation_from_selection(self) -> None:
+        """Starts interpolating whatever is currently selected.
+
+        The selected error first: working through the error list is the common
+        path, and it already knows the identity and the whole extent of the
+        gap. Otherwise the selected identity at the current frame, which the
+        interpolator then expands by itself.
+        """
+        # selected_error only exists once a row has been clicked.
+        if hasattr(self.errorsExplorer, "selected_error"):
+            kind, identity, start, length = self.errorsExplorer.selected_error
+            if kind in ("Jump", "Miss id") and identity > 0:
+                self.interpolator.set_interpolation_params(
+                    identity, start, start + length
+                )
+                return
+
+        if self.selected_id is not None and self.selected_id > 0:
+            self.interpolator.set_interpolation_params(
+                self.selected_id,
+                self.current_frame_number,
+                self.current_frame_number + 1,
+            )
 
     def manageDropedPaths(self, paths: Sequence[str]) -> None:
         if not paths:
@@ -548,7 +836,26 @@ class ValidationGUI(GUIBase):
         self.errorsExplorer.non_accepted_jumps[start:finish] = True
         self.update_trajectories_range(start, finish)
 
-    def save_session(self, wait: bool = False) -> None:
+    def autosave(self) -> None:
+        if not self.unsaved_changes:
+            return
+        if self.saving_session_thread is not None and (
+            self.saving_session_thread.isRunning()
+        ):
+            return
+        if self.save_thread is not None and self.save_thread.isRunning():
+            return
+
+        logging.info("Autosaving session")
+        self.save_session(silent=True)
+
+    def save_session(self, wait: bool = False, silent: bool = False) -> None:
+        """Writes the session, the blobs and the trajectories to disk.
+
+        `silent` skips the modal progress dialogs, which is what makes the
+        autosave usable: a dialog stealing focus every five minutes in the
+        middle of a click-heavy job would be worse than not autosaving.
+        """
         self.session.identities_labels = self.id_labels.get_labels()[1:]
         self.session.identities_colors = [
             c.name() for c in self.id_labels.get_colors()[0][1:]
@@ -559,49 +866,92 @@ class ValidationGUI(GUIBase):
         self.session.last_validated = datetime.now()
 
         saving_thread = SaveSessionObjects(
-            self.session, self.blobs, self, self.blobs_path
+            self.session, self.blobs, self, self.blobs_path, verbose=not silent
         )
-        progress_bar = QProgressDialog(
-            "Saving session, please wait...",
-            "Close app",
-            0,
-            0,
-            self,
-            Qt.WindowType.SplashScreen,
+        self.saving_session_thread = saving_thread
+        saving_thread.finished.connect(self.report_save_failure)
+        saving_thread.finished.connect(
+            lambda: self._start_save_trajectories(silent=silent)
         )
-        progress_bar.canceled.connect(saving_thread.terminate)
-        progress_bar.canceled.connect(sys.exit)
-        progress_bar.setModal(True)
 
-        saving_thread.finished.connect(self._start_save_trajectories)
-        saving_thread.finished.connect(progress_bar.cancel)
+        if not silent:
+            progress_bar = QProgressDialog(
+                "Saving session, please wait...",
+                "Close app",
+                0,
+                0,
+                self,
+                Qt.WindowType.SplashScreen,
+            )
+            progress_bar.canceled.connect(saving_thread.terminate)
+            progress_bar.canceled.connect(sys.exit)
+            progress_bar.setModal(True)
+            saving_thread.finished.connect(progress_bar.cancel)
+            progress_bar.show()
+
         saving_thread.start()
-        progress_bar.show()
         if wait:
             saving_thread.wait()
 
-    def _start_save_trajectories(self):
-        progress = QProgressDialog(
-            "Computing trajectories",
-            "Abort",
-            0,
-            self.session.number_of_frames + 1,
+    def report_save_failure(self) -> None:
+        """Tells the user when a save failed, and where the work went instead.
+
+        A failed save used to raise on a worker thread and be swallowed, so the
+        session looked saved when nothing had been written.
+        """
+        thread = self.saving_session_thread
+        if thread is None or thread.success:
+            return
+
+        if thread.backup_path is None:
+            QMessageBox.critical(
+                self,
+                "Session not saved",
+                f"The session could not be saved:\n{thread.error_message}\n\n"
+                "Writing a backup copy failed as well. Check the free space and"
+                " the permissions of your home folder, and do not close the"
+                " Validator: the work is still in memory.",
+            )
+            return
+
+        QMessageBox.warning(
             self,
-            Qt.WindowType.SplashScreen,
+            "Session saved elsewhere",
+            f"The session could not be saved in its own folder:\n"
+            f"{thread.error_message}\n\nIt was saved here instead:\n"
+            f"{thread.backup_path}\n\nCheck that the drive holding the session"
+            " is still connected.",
         )
-        progress.setMinimumDuration(1500)
-        progress.setModal(True)
+
+    def _start_save_trajectories(self, silent: bool = False):
+        if self.saving_session_thread is not None and (
+            not self.saving_session_thread.success
+        ):
+            return
 
         self.save_thread = SaveTrajectoriesThread(
             self.blobs.blobs_in_video, self.session, self.fragments
         )
-        progress.canceled.connect(self.save_thread.quit)
         self.save_thread.finished.connect(self.finish_saving)
-        self.save_thread.progress_changed.connect(progress.setValue)
+
+        if not silent:
+            progress = QProgressDialog(
+                "Computing trajectories",
+                "Abort",
+                0,
+                self.session.number_of_frames + 1,
+                self,
+                Qt.WindowType.SplashScreen,
+            )
+            progress.setMinimumDuration(1500)
+            progress.setModal(True)
+            progress.canceled.connect(self.save_thread.quit)
+            self.save_thread.progress_changed.connect(progress.setValue)
+
         self.save_thread.start()
 
     def finish_saving(self) -> None:
-        if self.save_thread.success:
+        if self.save_thread is not None and self.save_thread.success:
             self.unsaved_changes = False
 
     def check_unsaved_changes(self) -> None | QMessageBox.StandardButton:
@@ -733,6 +1083,7 @@ class ValidationGUI(GUIBase):
             )
         )
 
+        self.video_info.set_data(session)
         self.setup_points.load_points(session.setup_points)
         self.length_calibrator.load(
             session.length_calibrations
@@ -751,6 +1102,7 @@ class ValidationGUI(GUIBase):
             self.duplicated,
             self.blobs,
             tracking_intervals,
+            session=self.session,
         )
         self.interpolator.set_references(
             self.trajectories,
@@ -788,6 +1140,7 @@ class ValidationGUI(GUIBase):
             self.duplicated,
             self.blobs,
             tracking_intervals,
+            session=self.session,
         )
         self.interpolator.set_references(
             self.trajectories,
@@ -841,6 +1194,14 @@ class ValidationGUI(GUIBase):
             answer = DblClickDialog.Answers.ChangeId
 
         if answer == DblClickDialog.Answers.ChangeId:
+            self.undo_manager.push_identities(
+                f"Change identity {self.selected_id} to {new_id}",
+                (
+                    self.blobs_reachable_by_propagation(self.selected_blob)
+                    if propagate
+                    else [self.selected_blob]
+                ),
+            )
             self.selected_blob.update_identity(
                 self.selected_id, new_id, self.selection_last_location
             )
@@ -873,6 +1234,163 @@ class ValidationGUI(GUIBase):
                 self.selected_id,
                 self.current_frame_number,
                 self.current_frame_number + 1,
+            )
+            return
+
+        if answer == DblClickDialog.Answers.Swap:
+            self.swap_selected_identity()
+            return
+
+        if answer == DblClickDialog.Answers.Extend:
+            self.extend_selected_centroid()
+            return
+
+        if answer == DblClickDialog.Answers.Merge:
+            self.merge_selected_blob(propagate)
+
+    def swap_selected_identity(self) -> None:
+        """Exchanges the selected identity with another, along the fragment.
+
+        Two animals that cross and come out the wrong way round need both
+        identities moved. Renaming one of them, which is all "Change id"
+        offers, leaves the other duplicated for the rest of the fragment.
+        """
+        if self.selected_id is None or self.selected_id <= 0:
+            return
+
+        target_id, ok = QInputDialog.getInt(
+            self,
+            "Swap identities",
+            f"Exchange identity {self.selected_id} with:",
+            1,  # value
+            1,  # minimum
+            self.n_animals,  # maximum
+        )
+        if not ok or target_id == self.selected_id:
+            return
+
+        self.undo_manager.push_identities(
+            f"Swap identities {self.selected_id} and {target_id}",
+            self.blobs_reachable_by_propagation(self.selected_blob),
+        )
+        lower, upper = self.selected_blob.propagate_swap_identity(
+            self.selected_id, target_id, self.selection_last_location
+        )
+        self.update_trajectories_range(lower, upper + 1)
+        if lower != upper:
+            self.light_popup.info(
+                "Identities swapped",
+                f"Swap propagated from frame {lower} to frame {upper}",
+            )
+
+    def extend_selected_centroid(self) -> None:
+        """Repeats the selected centroid over the following frames.
+
+        An animal that stops moving can stop being segmented, leaving a gap
+        that interpolation fills with a straight line between two points that
+        are in the same place anyway. Stamping the centroid says the same thing
+        in one step.
+        """
+        if self.selected_id is None or self.selected_id <= 0:
+            return
+
+        n_frames, ok = QInputDialog.getInt(
+            self,
+            "Extend centroid",
+            "Repeat this centroid over the next N frames:",
+            10,  # value
+            1,  # minimum
+            self.n_frames - self.current_frame_number,  # maximum
+        )
+        if not ok:
+            return
+
+        frames = range(
+            self.current_frame_number,
+            min(self.n_frames, self.current_frame_number + n_frames),
+        )
+        # add_centroid can create a blob as well as edit one, so the blob lists
+        # go into the snapshot too.
+        self.undo_manager.push_frames(
+            f"Extend identity {self.selected_id} over {len(frames)} frames", frames
+        )
+
+        for frame in frames:
+            self.blobs.add_centroid(
+                frame, self.selected_id, self.selection_last_location
+            )
+        self.update_trajectories_range(frames.start, frames.stop)
+
+    def merge_selected_blob(self, propagate: bool) -> None:
+        """Merges the selected blob with the one carrying another identity.
+
+        Blobs are found by identity rather than by object, because the selected
+        blob does not exist as the same object in later frames; its identity
+        does. With `propagate` the merge repeats for as long as both identities
+        keep appearing on separate blobs, bounded by
+        `MERGE_PROPAGATION_FRAMES`.
+        """
+        target_id, ok = QInputDialog.getInt(
+            self,
+            "Merge blobs",
+            "Merge this blob with the blob of identity:",
+            1,  # value
+            1,  # minimum
+            self.n_animals,  # maximum
+        )
+        if not ok:
+            return
+
+        identities_to_merge = {target_id}
+        if self.selected_id is not None and self.selected_id > 0:
+            identities_to_merge.add(self.selected_id)
+
+        start_frame = self.current_frame_number
+        end_frame = (
+            min(start_frame + MERGE_PROPAGATION_FRAMES, self.blobs.number_of_frames)
+            if propagate
+            else start_frame + 1
+        )
+
+        merges: list[tuple[int, list[int]]] = []
+        for frame in range(start_frame, end_frame):
+            indices = [
+                index
+                for index, blob in enumerate(self.blobs.blobs_in_video[frame])
+                if identities_to_merge.intersection(blob.all_final_identities)
+            ]
+            if len(indices) >= 2:
+                merges.append((frame, indices))
+            elif propagate:
+                # The parts stopped being separate; anything further along is
+                # a different situation.
+                break
+
+        if not merges:
+            self.light_popup.info(
+                "Nothing to merge",
+                "No frame in this range has two separate blobs carrying"
+                f" identities {sorted(identities_to_merge)}.",
+            )
+            return
+
+        new_identity = (
+            self.selected_id
+            if self.selected_id is not None and self.selected_id > 0
+            else target_id
+        )
+        self.undo_manager.push_frames(
+            f"Merge identities {sorted(identities_to_merge)} in"
+            f" {len(merges)} frame(s)",
+            [frame for frame, _ in merges],
+        )
+        for frame, indices in merges:
+            self.blobs.merge_blobs(frame, indices, new_identity)
+
+        self.update_trajectories_range(start_frame, merges[-1][0] + 1)
+        if len(merges) > 1:
+            self.light_popup.info(
+                "Blobs merged", f"Merged blobs in {len(merges)} frames."
             )
 
     def paint(self, painter: CanvasPainter, frame_number: int) -> None:
