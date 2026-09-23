@@ -112,6 +112,16 @@ external_contours = "contours/clip_01.h5"
 The intensity thresholds and background subtraction grey out, because they take
 no part once contours come from a model.
 
+## The Validator
+
+This fork also changes idtracker.ai's Validator, the tool for correcting
+trajectories by hand after tracking. It gains undo, an autosave that survives
+a lost drive, three new editing operations, filters that keep the error list
+workable on long recordings, and a handful of shortcuts. Nothing about tracking
+is affected.
+
+What changed and why is in **[VALIDATOR.md](VALIDATOR.md)**.
+
 ## Citing
 
 The tracking method is the de Polavieja Lab's work. **Cite their paper**,
