@@ -97,11 +97,14 @@ Files added:
       Sidecar contour format and reader.
 
   src/idtrackerai/extra_tools/detectron2_pipeline/
-      The pipeline that produces the contour files: frame enhancement,
-      stratified frame sampling for annotation, LabelMe to COCO
-      conversion, and the state that lets a preparation be resumed. Lives
-      in the package so the GUI and the command-line scripts run the same
-      code rather than two copies that drift.
+      The whole pipeline that produces the contour files: frame
+      enhancement, stratified frame sampling for annotation, LabelMe to
+      COCO conversion, the state that lets a preparation be resumed, Mask
+      R-CNN fine-tuning, batch inference, video preflight, the Colab
+      bundle builder and the notebook itself. Lives in the package so that
+      it installs with it, and so the GUI and the command line run the
+      same code rather than two copies that drift. Exposed as the
+      idtrackerai_d2_* commands declared in pyproject.toml.
 
   src/idtrackerai/segmentation_app/widgets/segmentation_source.py
       The segmentation source selector widget.
@@ -118,10 +121,8 @@ Files added:
   tests/external_contours_test.py
       Tests for the sidecar format and the segmentation path.
 
-  tools/
-      Command-line front ends over the package, plus the GPU stages that
-      run on Colab: Mask R-CNN fine-tuning, batch inference, video
-      preflight, the Colab bundle builder, and the notebook itself.
+  docs/detectron2-pipeline.md
+      Documentation for the pipeline above.
 
   docs/Automated behaviour tracking workflow.txt
       Methods write-up for the earlier enhanced-video workflow this
@@ -131,10 +132,10 @@ Files added:
       This file and citation metadata.
 
 
-Third-party components used by tools/
---------------------------------------
+Third-party components
+----------------------
 
-The scripts under tools/ depend on, but do not include, the following.
+The pipeline depends on, but does not include, the following.
 Each carries its own licence:
 
   Detectron2   Apache-2.0   https://github.com/facebookresearch/detectron2

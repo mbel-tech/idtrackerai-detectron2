@@ -92,10 +92,13 @@ pipeline**. A guided panel walks through the four local stages:
 You can close the app between steps; each one records what it produced, and
 status is re-derived from disk when you come back.
 
-Training and inference need a GPU and run in
-[`tools/colab_detectron2_pipeline.ipynb`](tools/colab_detectron2_pipeline.ipynb).
-The same stages are available as command-line scripts — see
-**[tools/README.md](tools/README.md)**.
+Training and inference need a GPU, so they run in Colab. The notebook ships
+with the package; `idtrackerai_d2_bundle` packages it together with the GPU
+scripts, ready to upload.
+
+Every stage is also available as an installed command — `idtrackerai_d2_sample`,
+`idtrackerai_d2_dataset`, `idtrackerai_d2_train` and so on — for scripting or a
+headless machine. See **[docs/detectron2-pipeline.md](docs/detectron2-pipeline.md)**.
 
 ### Tracking with the result
 

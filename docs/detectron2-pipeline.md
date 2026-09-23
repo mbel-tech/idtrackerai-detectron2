@@ -26,7 +26,7 @@ thresholds to tune.
 ```
 
 Steps 1–4 are in the GUI. Steps 5–6 need a GPU and run in
-[`colab_detectron2_pipeline.ipynb`](colab_detectron2_pipeline.ipynb).
+the Colab notebook, which `idtrackerai_d2_bundle` packages for you.
 
 The enhancement settings chosen in step 1 travel all the way to step 6. That is
 the point of the profile file: the model must see the same kind of image at
@@ -58,32 +58,33 @@ Then upload the dataset and your videos to Drive and open the notebook.
 
 ## From the command line
 
-The same code, for scripting or a headless machine:
+The same code, for scripting or a headless machine. These are installed as
+commands with the package, so they work without cloning the repository:
 
 ```bash
 # 1. tune the enhancement for this recording setup and save it
-python tools/frame_preprocessing.py --video clips/clip_01.mp4 --frame 500 \
+idtrackerai_d2_enhance --video clips/clip_01.mp4 --frame 500 \
     --output check.png --save-profile setups/tank_a.json
 
 # 2. pull frames for annotation, spread across the whole of every clip
-python tools/sample_frames.py --videos clips/*.mp4 --n-frames 600 \
+idtrackerai_d2_sample --videos clips/*.mp4 --n-frames 600 \
     --output annotate/ --preprocess-profile setups/tank_a.json
 
 # 3. annotate in LabelMe: one polygon per animal, one consistent label
 python -m labelme annotate/ --labels fish --validate-label exact
 
 # 4. convert and split
-python tools/labelme_to_coco.py --input annotate/ --output dataset/ \
+idtrackerai_d2_dataset --input annotate/ --output dataset/ \
     --single-class fish --expected-instances 5 --val-fraction 0.15
 
 # 5. check the annotations landed where you think, before spending GPU time
-python tools/train_detectron2.py --dataset dataset/ --output model/ --check-dataset
+idtrackerai_d2_train --dataset dataset/ --output model/ --check-dataset
 
 # 6. train
-python tools/train_detectron2.py --dataset dataset/ --output model/ --epochs 40
+idtrackerai_d2_train --dataset dataset/ --output model/ --epochs 40
 
 # 7. one contour file per clip
-python tools/detectron2_export_contours.py --videos clips/*.mp4 \
+idtrackerai_d2_export --videos clips/*.mp4 \
     --weights model/model_final.pth --output-dir contours/ --max-instances 5
 ```
 
@@ -135,10 +136,10 @@ the hard crossings before trusting a batch of trajectories.
 
 Enhancement, sampling, annotation and dataset building stay local. Training
 and contour export move to Colab via
-[`colab_detectron2_pipeline.ipynb`](colab_detectron2_pipeline.ipynb).
+the Colab notebook, which `idtrackerai_d2_bundle` packages for you.
 
 ```bash
-python tools/make_colab_bundle.py          # ~27 KB zip of just what Colab needs
+idtrackerai_d2_bundle          # ~27 KB zip of just what Colab needs
 ```
 
 Upload to `MyDrive/idtrackerai_detectron2/`:
@@ -160,7 +161,7 @@ the mount, opens every clip, decodes a frame from each, and reports what is
 already exported before anything long begins:
 
 ```bash
-python tools/check_videos.py --videos clips/*.mp4 --contours contours/
+idtrackerai_d2_videos --videos clips/*.mp4 --contours contours/
 ```
 
 Run it locally too — it exits non-zero on an unopenable or truncated clip.

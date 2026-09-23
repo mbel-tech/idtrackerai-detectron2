@@ -52,11 +52,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# Make the sibling modules importable however this file is loaded: as a
-# script, from another directory, or via importlib from a test.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import frame_preprocessing as fp
+try:
+    from . import preprocessing as fp
+except ImportError:  # loaded by path, e.g. from a Colab bundle
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import preprocessing as fp  # type: ignore[no-redef]
 
 
 def load_training_metadata(weights: Path) -> dict | None:
@@ -85,6 +85,8 @@ def load_writer():
     except ImportError:
         pass
 
+    # Colab bundle layout: this file is unpacked at <root>/tools/ and the
+    # writer keeps its repository path under <root>/src/.
     candidate = (
         Path(__file__).resolve().parent.parent
         / "src/idtrackerai/base/animals_detection/external_contours.py"

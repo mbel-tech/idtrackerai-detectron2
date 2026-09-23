@@ -97,6 +97,7 @@ idtrackerai = [
     "GUI_tools/*.svg",
     "GUI_tools/*.dat",
     "data/*.avi",
+    "extra_tools/detectron2_pipeline/notebooks/*.ipynb",
 ]
 
 [project.scripts]
@@ -108,6 +109,16 @@ idtrackerai_format = "idtrackerai.utils.trajectories_io:idtrackerai_format_entry
 idtrackerai_inspect_clusters = "idtrackerai.extra_tools.cluster_inspection:idtrackerai_inspect_clusters_entrypoint"
 idtrackerai_background = "idtrackerai.base.animals_detection.segmentation:idtrackerai_background_entrypoint"
 idmatcherai = "idtrackerai.extra_tools.idmatcherai:idmatcherai_entrypoint"
+
+# The Detectron2 preparation pipeline. Installed with the package, so they are
+# available without cloning the repository.
+idtrackerai_d2_enhance = "idtrackerai.extra_tools.detectron2_pipeline.preprocessing:_demo"
+idtrackerai_d2_sample = "idtrackerai.extra_tools.detectron2_pipeline.cli:sample_main"
+idtrackerai_d2_dataset = "idtrackerai.extra_tools.detectron2_pipeline.cli:dataset_main"
+idtrackerai_d2_train = "idtrackerai.extra_tools.detectron2_pipeline.training:main"
+idtrackerai_d2_export = "idtrackerai.extra_tools.detectron2_pipeline.inference:main"
+idtrackerai_d2_videos = "idtrackerai.extra_tools.detectron2_pipeline.videos:main"
+idtrackerai_d2_bundle = "idtrackerai.extra_tools.detectron2_pipeline.bundle:main"
 
 [tool.pytest.ini_options]
 log_file_format = "%(asctime)s %(levelname)8s %(message)s (%(filename)s:%(lineno)s)"
