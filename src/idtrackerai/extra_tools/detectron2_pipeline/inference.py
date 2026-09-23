@@ -402,6 +402,17 @@ def export_video(
     return stats
 
 
+def _is_sidecar(path) -> bool:
+    """Filesystem metadata that merely looks like a media file.
+
+    macOS writes a "._name.mp4" companion beside every file it copies onto
+    a non-Apple filesystem. It carries the same extension, so any *.mp4
+    glob picks it up and OpenCV then reports it as an unreadable video.
+    """
+    name = Path(path).name
+    return name.startswith("._") or name in (".DS_Store", "Thumbs.db", "desktop.ini")
+
+
 def resolve_videos(args) -> list[Path]:
     if args.video:
         return [args.video]
@@ -411,7 +422,7 @@ def resolve_videos(args) -> list[Path]:
             videos.extend(sorted(pattern.parent.glob(pattern.name)))
         else:
             videos.append(pattern)
-    return [v for v in videos if v.is_file()]
+    return [v for v in videos if v.is_file() and not _is_sidecar(v)]
 
 
 def main():

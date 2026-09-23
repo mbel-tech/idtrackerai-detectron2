@@ -110,6 +110,17 @@ def allocate(counts: Sequence[int], total: int, even: bool) -> list[int]:
     return allocation
 
 
+def _is_sidecar(path) -> bool:
+    """Filesystem metadata that merely looks like a media file.
+
+    macOS writes a "._name.mp4" companion beside every file it copies onto
+    a non-Apple filesystem. It carries the same extension, so any *.mp4
+    glob picks it up and OpenCV then reports it as an unreadable video.
+    """
+    name = Path(path).name
+    return name.startswith("._") or name in (".DS_Store", "Thumbs.db", "desktop.ini")
+
+
 def resolve_videos(patterns: Sequence[Path]) -> list[Path]:
     """Expands globs and drops anything that is not a file."""
     videos: list[Path] = []
@@ -118,7 +129,7 @@ def resolve_videos(patterns: Sequence[Path]) -> list[Path]:
             videos.extend(sorted(pattern.parent.glob(pattern.name)))
         else:
             videos.append(Path(pattern))
-    return [v for v in videos if v.is_file()]
+    return [v for v in videos if v.is_file() and not _is_sidecar(v)]
 
 
 def plan_sampling(

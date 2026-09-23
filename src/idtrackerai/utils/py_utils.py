@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from importlib import metadata
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from functools import wraps
@@ -36,6 +36,35 @@ def deprecated(version: str = "", reason: str = "", **kwargs):
         return wrapper
 
     return decorator
+
+
+# Files that sit beside real media but are not media. AppleDouble companions
+# are the common one: macOS writes a "._name.ext" file next to every file it
+# copies onto a non-Apple filesystem, holding resource-fork metadata. They
+# carry the same extension as the file they shadow, so any *.mp4 glob picks
+# them up, and OpenCV then reports the video as unreadable.
+SIDECAR_NAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
+
+
+def is_metadata_sidecar(path: Path | str) -> bool:
+    """True for filesystem metadata that merely looks like a media file."""
+    name = Path(path).name
+    return name.startswith("._") or name in SIDECAR_NAMES
+
+
+def drop_metadata_sidecars(
+    paths: Iterable[Path | str],
+) -> tuple[list[Path], list[Path]]:
+    """Splits paths into real files and metadata sidecars.
+
+    Returns (kept, dropped) so the caller can say what it ignored rather than
+    discarding the user's selection silently.
+    """
+    kept: list[Path] = []
+    dropped: list[Path] = []
+    for path in paths:
+        (dropped if is_metadata_sidecar(path) else kept).append(Path(path))
+    return kept, dropped
 
 
 def idtrackerai_version() -> str:

@@ -95,7 +95,8 @@ def main():
             videos.extend(sorted(pattern.parent.glob(pattern.name)))
         else:
             videos.append(pattern)
-    videos = [v for v in videos if v.is_file()]
+    # macOS "._name.mp4" companions match any *.mp4 glob and are not videos
+    videos = [v for v in videos if v.is_file() and not v.name.startswith("._")]
 
     if not videos:
         raise SystemExit(

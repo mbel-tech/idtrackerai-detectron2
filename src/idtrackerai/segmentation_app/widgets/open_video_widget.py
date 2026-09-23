@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from qtpy.QtWidgets import (
 
 from idtrackerai import IdtrackeraiError, Session
 from idtrackerai.GUI_tools import GUIBase, WrappedLabel, key_event_modifier
-from idtrackerai.utils import load_toml, resolve_path
+from idtrackerai.utils import drop_metadata_sidecars, load_toml, resolve_path
 
 
 class AdaptativeList(QListWidget):
@@ -126,6 +127,27 @@ class OpenVideoWidget(QWidget):
             return
 
         video_paths = sorted(map(resolve_path, video_paths_))
+
+        # Drop filesystem metadata that merely looks like a video. macOS writes
+        # a "._name.mp4" companion beside every file it copies onto a non-Apple
+        # filesystem, so selecting a folder's worth of clips can pick up twice
+        # as many paths as there are videos, and OpenCV reports the first
+        # companion as an unreadable video.
+        video_paths, sidecars = drop_metadata_sidecars(video_paths)
+        if sidecars:
+            logging.info("Ignoring %d metadata file(s) such as %s",
+                         len(sidecars), sidecars[0].name)
+            QMessageBox.information(
+                self,
+                "Ignored metadata files",
+                f"{len(sidecars)} of the selected files are filesystem "
+                "metadata rather than videos, and have been ignored.\n\n"
+                f"The first is {sidecars[0].name}. Names beginning with '._' "
+                "are written by macOS beside each real file when copying onto "
+                "a non-Apple drive. They are safe to delete.",
+            )
+        if not video_paths:
+            return
 
         if any(path.suffix == ".toml" for path in video_paths):
             if len(video_paths) > 1:
