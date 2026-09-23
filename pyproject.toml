@@ -53,6 +53,11 @@ dependencies = [
     'scikit-learn >= 1.6.0',
     'requests >= 2.26.0',
     'deprecated >= 1.2.13',
+    # Annotation stage of the Detectron2 pipeline. Brings PySide6, which
+    # coexists with this package's PyQt6 because LabelMe is launched as a
+    # separate process and idtrackerai/__init__.py pins QT_API=pyqt6 before
+    # qtpy is imported.
+    'labelme >= 7.7.0',
 ]
 
 [project.optional-dependencies]

@@ -133,6 +133,24 @@ def main():
         manifest = {f["file_name"]: f for f in data["frames"]}
         print(f"Using provenance from {manifest_path.name}")
 
+    # Carry the enhancement settings forward. Training reads them from here and
+    # records them with the weights, so that inference can reproduce exactly the
+    # images the model was trained on. Without this the chain breaks silently:
+    # training records null, inference falls back to the built-in defaults, and
+    # because there is nothing to compare against, no mismatch warning fires.
+    enhancement = None
+    profile_path = args.input / "preprocess_profile.json"
+    if profile_path.is_file():
+        enhancement = {
+            k: v
+            for k, v in json.loads(profile_path.read_text(encoding="utf-8")).items()
+            if k not in ("name", "notes")
+        }
+    elif manifest_path.is_file():
+        enhancement = json.loads(manifest_path.read_text(encoding="utf-8")).get(
+            "enhancement"
+        )
+
     problems: list[str] = []
     notes: list[str] = []
     label_counter: Counter[str] = Counter()
@@ -360,6 +378,7 @@ def main():
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "input": str(args.input),
         "split_by": args.split_by,
+        "enhancement": enhancement,
         "categories": categories,
         "label_counts": dict(label_counter),
         "train": {
@@ -376,6 +395,19 @@ def main():
         "notes": notes,
     }
     (args.output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    # Also copy the profile itself into the dataset, so the settings travel with
+    # the data when only the dataset folder is uploaded to Colab.
+    if profile_path.is_file():
+        shutil.copy2(profile_path, args.output / "preprocess_profile.json")
+    elif enhancement is None:
+        print(
+            "\nWARNING: no enhancement record found in"
+            f" {args.input}.\n  Training will not know how these frames were"
+            " prepared, and inference will fall back to the built-in defaults"
+            "\n  without warning. Re-run sample_frames.py to produce one, or"
+            " copy the setup's\n  preprocess_profile.json into that folder."
+        )
 
     # ----------------------------------------------------------------- report
     print(f"\nCategories: {[c['name'] for c in categories]}  (NUM_CLASSES = {len(categories)})")

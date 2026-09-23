@@ -196,15 +196,25 @@ def main():
             for metric, value in metrics.items():
                 print(f"  {task}/{metric}: {value:.3f}")
 
+    # How the frames were prepared, recorded with the weights so inference can
+    # reproduce it. Checked in order of directness: the profile copied into the
+    # dataset, then the dataset report, then a sampling manifest if the dataset
+    # happens to sit inside the annotation folder.
     enhancement = None
-    report = args.dataset / "report.json"
-    sampling = args.dataset.parent / "sampling_manifest.json"
-    for candidate in (sampling, report):
-        if candidate.is_file():
-            data = json.loads(candidate.read_text(encoding="utf-8"))
-            if "enhancement" in data:
-                enhancement = data["enhancement"]
-                break
+    for candidate in (
+        args.dataset / "preprocess_profile.json",
+        args.dataset / "report.json",
+        args.dataset.parent / "sampling_manifest.json",
+    ):
+        if not candidate.is_file():
+            continue
+        data = json.loads(candidate.read_text(encoding="utf-8"))
+        found = data.get("enhancement", data if "clahe_clip" in data else None)
+        # a recorded null means "no record", not "enhancement is None"
+        if found:
+            enhancement = {k: v for k, v in found.items() if k not in ("name", "notes")}
+            print(f"Frame enhancement read from {candidate.name}")
+            break
 
     metadata = {
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -228,9 +238,12 @@ def main():
 
     if enhancement is None:
         print(
-            "\nNo frame-enhancement record was found in the dataset folder, so"
-            "\ninference cannot be checked against training settings. Keep"
-            "\nsampling_manifest.json beside the dataset to enable that check."
+            "\nWARNING: no frame-enhancement record was found alongside the"
+            " dataset.\nThe weights will record null, so at inference the"
+            " exporter falls back to the\nbuilt-in defaults and the"
+            " training/inference mismatch check cannot fire.\nIf these frames"
+            " were enhanced, copy the setup's preprocess_profile.json into\n"
+            f"{args.dataset} and train again."
         )
 
     print(f"\nWeights:  {args.output / 'model_final.pth'}")
