@@ -521,8 +521,17 @@ def main():
 
     write_contours = load_writer()
     metadata = load_training_metadata(args.weights)
-    enhance = fp.make_enhancer(args)
-    enhancement = fp.settings_from_args(args)
+    # Inference adopts whatever the model was trained with, unless the user
+    # deliberately overrides it. Retyping the flags identically at inference
+    # time was the old requirement, and an easy thing to get silently wrong.
+    trained_with = (metadata or {}).get("enhancement")
+    enhancement, notes = fp.resolve_settings(
+        args, fallback=trained_with, fallback_label="the model's training record"
+    )
+    for note in notes:
+        print(note)
+    print(f"enhancement: {fp.describe(enhancement)}")
+    enhance = fp.make_enhancer_from(enhancement)
 
     if metadata is None:
         print(
@@ -530,9 +539,7 @@ def main():
             " that inference matches how the model was trained."
         )
     else:
-        mismatch = fp.check_settings_match(
-            metadata.get("enhancement"), enhancement, "training"
-        )
+        mismatch = fp.check_settings_match(trained_with, enhancement, "training")
         if mismatch:
             print(f"\nWARNING: {mismatch}\n")
 

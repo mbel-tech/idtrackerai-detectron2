@@ -1,35 +1,61 @@
 """The frame enhancement applied before Detectron2, shared by every stage.
 
-This has to be one module, not a copy in each script. The model learns the
-appearance of the frames it was annotated on, so the frames extracted for
+Enhancement is a property of a *recording setup*, not of this software. A well
+lit tank with good contrast may need none at all; a turbid one under uneven
+lighting may need strong CLAHE. So nothing here is hardwired: the settings live
+in a profile file you keep per setup, and every tool reads it.
+
+This has to be one module, not a copy in each script, because the model learns
+the appearance of the frames it was annotated on. The frames extracted for
 annotation, the frames used for training and the frames passed to the predictor
-at inference must all go through the exact same function. A CLAHE setting that
-differs between training and inference is a silent accuracy loss that looks like
-a model problem.
+at inference must all go through the same function with the same settings. A
+CLAHE value that differs between training and inference is a silent accuracy
+loss that looks like a model problem, so the settings travel with the model and
+inference adopts them by default.
 
-The steps follow the established workflow:
+Where settings come from, highest priority first:
 
-1. grayscale
-2. correction for uneven illumination, by subtracting a Gaussian-blurred
-   background estimate computed on a downsampled copy of the frame
-3. CLAHE (clip limit 1.5, 8x8 tiles)
+1. explicit command-line flags
+2. --preprocess-profile FILE
+3. the settings recorded with the trained weights (inference only)
+4. the built-in defaults below
+
+The built-in defaults reproduce the pipeline this fork replaced. They are a
+starting point for one particular setup, not a recommendation. Tune them
+against your own footage:
+
+    python tools/frame_preprocessing.py --video clip.mp4 --frame 500 \\
+        --output check.png --save-profile setups/tank_a.json
 
 Detectron2's R-50-FPN configs expect 3-channel BGR input, so the enhanced
 single-channel image is replicated across three channels by :func:`for_detectron2`.
 """
 
 import argparse
+import json
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
 
-# Defaults matching the documented workflow.
+# Starting point, not a recommendation. Override per setup with a profile.
 CLAHE_CLIP_LIMIT = 1.5
 CLAHE_TILE_GRID = 8
 ILLUMINATION_DOWNSAMPLE = 4
 ILLUMINATION_SIGMA = 25.0
 ILLUMINATION_PIVOT = 128
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "enhance": True,
+    "clahe_clip": CLAHE_CLIP_LIMIT,
+    "clahe_tile": CLAHE_TILE_GRID,
+    "illumination_sigma": ILLUMINATION_SIGMA,
+    "illumination_downsample": ILLUMINATION_DOWNSAMPLE,
+    "correct_lighting": True,
+}
+
+SETTING_KEYS = tuple(DEFAULT_SETTINGS)
 
 
 def to_gray(frame: np.ndarray) -> np.ndarray:
@@ -99,61 +125,193 @@ def for_detectron2(frame: np.ndarray, **kwargs) -> np.ndarray:
     return cv2.cvtColor(enhance(frame, **kwargs), cv2.COLOR_GRAY2BGR)
 
 
+# ------------------------------------------------------------------ profiles
+def load_profile(path: Path | str) -> dict:
+    """Reads a profile file, rejecting unknown or malformed keys loudly.
+
+    A typo'd key silently falling back to a default is exactly the kind of
+    mismatch this module exists to prevent, so it is an error instead.
+    """
+    path = Path(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SystemExit(f"Preprocessing profile not found: {path}")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Preprocessing profile {path} is not valid JSON: {exc}")
+
+    if not isinstance(data, dict):
+        raise SystemExit(f"Preprocessing profile {path} must contain a JSON object")
+
+    settings = data.get("enhancement", data)
+    unknown = set(settings) - set(SETTING_KEYS) - {"name", "notes"}
+    if unknown:
+        raise SystemExit(
+            f"Preprocessing profile {path} has unknown key(s): {sorted(unknown)}.\n"
+            f"Valid keys: {list(SETTING_KEYS)}"
+        )
+    return {k: v for k, v in settings.items() if k in SETTING_KEYS}
+
+
+def save_profile(path: Path | str, settings: dict, name: str = "", notes: str = "") -> Path:
+    """Writes a profile, so a setup's settings can be reused and version controlled."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {}
+    if name:
+        payload["name"] = name
+    if notes:
+        payload["notes"] = notes
+    payload.update({k: settings[k] for k in SETTING_KEYS})
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Adds the enhancement flags, so every tool exposes the same names."""
-    group = parser.add_argument_group("frame enhancement")
+    """Adds the enhancement options, so every tool exposes the same names.
+
+    Every flag defaults to None so that "not given" is distinguishable from
+    "given the default value". That is what lets inference adopt the settings
+    recorded at training time unless you deliberately override them.
+    """
+    group = parser.add_argument_group(
+        "frame enhancement",
+        "Per-setup image preparation. Defaults come from --preprocess-profile,"
+        " or from the settings recorded with the model, or from the built-ins.",
+    )
+    group.add_argument(
+        "--preprocess-profile",
+        type=Path,
+        help="JSON file of enhancement settings for this recording setup",
+    )
     group.add_argument(
         "--no-enhance",
         action="store_true",
-        help="feed raw frames to the model (only if it was trained on raw frames)",
+        default=None,
+        help="feed raw frames to the model, for footage that needs no help",
     )
-    group.add_argument("--clahe-clip", type=float, default=CLAHE_CLIP_LIMIT)
-    group.add_argument("--clahe-tile", type=int, default=CLAHE_TILE_GRID)
-    group.add_argument("--illumination-sigma", type=float, default=ILLUMINATION_SIGMA)
     group.add_argument(
-        "--illumination-downsample", type=int, default=ILLUMINATION_DOWNSAMPLE
+        "--enhance",
+        dest="force_enhance",
+        action="store_true",
+        default=None,
+        help="enhance even if the profile or the model's record disables it",
     )
+    group.add_argument("--clahe-clip", type=float, default=None)
+    group.add_argument("--clahe-tile", type=int, default=None)
+    group.add_argument("--illumination-sigma", type=float, default=None)
+    group.add_argument("--illumination-downsample", type=int, default=None)
     group.add_argument(
         "--no-illumination-correction",
         action="store_true",
+        default=None,
         help="apply CLAHE only, leaving uneven lighting in place",
     )
 
 
-def settings_from_args(args) -> dict:
-    """The enhancement settings as a dict, for recording alongside outputs.
+def _explicit_from_args(args) -> dict:
+    """Only the settings the user actually typed."""
+    explicit: dict[str, Any] = {}
+    for flag, key in (
+        ("clahe_clip", "clahe_clip"),
+        ("clahe_tile", "clahe_tile"),
+        ("illumination_sigma", "illumination_sigma"),
+        ("illumination_downsample", "illumination_downsample"),
+    ):
+        value = getattr(args, flag, None)
+        if value is not None:
+            explicit[key] = value
 
-    Every tool writes this next to its results so a later run can be checked for
-    drift against the settings the model was trained with.
+    if getattr(args, "no_enhance", None):
+        explicit["enhance"] = False
+    elif getattr(args, "force_enhance", None):
+        explicit["enhance"] = True
+
+    if getattr(args, "no_illumination_correction", None):
+        explicit["correct_lighting"] = False
+    return explicit
+
+
+def resolve_settings(args, fallback: dict | None = None, fallback_label: str = "") -> tuple[dict, list[str]]:
+    """Layers flags over a profile over a fallback over the built-in defaults.
+
+    Returns the settings and a list of human-readable notes describing where
+    each layer came from, which the tools print so the choice is never silent.
     """
-    return {
-        "enhance": not args.no_enhance,
-        "clahe_clip": args.clahe_clip,
-        "clahe_tile": args.clahe_tile,
-        "illumination_sigma": args.illumination_sigma,
-        "illumination_downsample": args.illumination_downsample,
-        "correct_lighting": not args.no_illumination_correction,
-    }
+    notes: list[str] = []
+    settings = dict(DEFAULT_SETTINGS)
+    source = "built-in defaults"
+
+    if fallback:
+        usable = {k: v for k, v in fallback.items() if k in SETTING_KEYS}
+        if usable:
+            settings.update(usable)
+            source = fallback_label or "recorded settings"
+
+    profile_path = getattr(args, "preprocess_profile", None)
+    if profile_path:
+        settings.update(load_profile(profile_path))
+        notes.append(f"enhancement profile: {profile_path}")
+        source = str(profile_path)
+    else:
+        notes.append(f"enhancement settings from {source}")
+
+    explicit = _explicit_from_args(args)
+    if explicit:
+        settings.update(explicit)
+        notes.append(
+            "overridden on the command line: "
+            + ", ".join(f"{k}={v}" for k, v in sorted(explicit.items()))
+        )
+
+    if not settings["enhance"]:
+        notes.append("enhancement is OFF; raw frames are used")
+    return settings, notes
 
 
-def make_enhancer(args):
+def settings_from_args(args) -> dict:
+    """The settings as a dict, for recording alongside outputs."""
+    settings, _ = resolve_settings(args)
+    return settings
+
+
+def make_enhancer_from(settings: dict):
     """Builds the callable each tool applies to every frame."""
-    if args.no_enhance:
-        return lambda frame: frame if frame.ndim == 3 else cv2.cvtColor(
-            frame, cv2.COLOR_GRAY2BGR
+    if not settings.get("enhance", True):
+        return lambda frame: (
+            frame if frame.ndim == 3 else cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
         )
 
     def enhancer(frame: np.ndarray) -> np.ndarray:
         return for_detectron2(
             frame,
-            clahe_clip=args.clahe_clip,
-            clahe_tile=args.clahe_tile,
-            downsample=args.illumination_downsample,
-            sigma=args.illumination_sigma,
-            correct_lighting=not args.no_illumination_correction,
+            clahe_clip=settings["clahe_clip"],
+            clahe_tile=settings["clahe_tile"],
+            downsample=settings["illumination_downsample"],
+            sigma=settings["illumination_sigma"],
+            correct_lighting=settings["correct_lighting"],
         )
 
     return enhancer
+
+
+def make_enhancer(args):
+    """Convenience wrapper for tools that do not need a fallback layer."""
+    return make_enhancer_from(settings_from_args(args))
+
+
+def describe(settings: dict) -> str:
+    if not settings.get("enhance", True):
+        return "none (raw frames)"
+    parts = [f"CLAHE clip={settings['clahe_clip']} tile={settings['clahe_tile']}"]
+    if settings["correct_lighting"]:
+        parts.append(
+            f"illumination sigma={settings['illumination_sigma']}"
+            f" downsample={settings['illumination_downsample']}"
+        )
+    else:
+        parts.append("no illumination correction")
+    return "; ".join(parts)
 
 
 def check_settings_match(recorded: dict | None, current: dict, label: str) -> str | None:
@@ -179,13 +337,32 @@ def check_settings_match(recorded: dict | None, current: dict, label: str) -> st
 
 
 def _demo():
-    """Writes a before/after strip, to eyeball the settings on one frame."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    """Writes a before/after strip, to tune the settings on real footage.
+
+    Use this to pick settings for a new recording setup, then --save-profile to
+    keep them.
+    """
+    parser = argparse.ArgumentParser(
+        description="Preview and save enhancement settings for a recording setup",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument("--frame", type=int, default=0)
     parser.add_argument("--output", type=Path, default=Path("enhancement_demo.png"))
+    parser.add_argument(
+        "--save-profile",
+        type=Path,
+        help="write these settings to a profile file for reuse",
+    )
+    parser.add_argument("--name", default="", help="a label for the saved profile")
+    parser.add_argument("--notes", default="", help="a note for the saved profile")
     add_arguments(parser)
     args = parser.parse_args()
+
+    settings, notes = resolve_settings(args)
+    for note in notes:
+        print(note)
+    print(f"enhancement: {describe(settings)}")
 
     cap = cv2.VideoCapture(str(args.video))
     cap.set(cv2.CAP_PROP_POS_FRAMES, args.frame)
@@ -195,10 +372,28 @@ def _demo():
         raise SystemExit(f"Could not read frame {args.frame} of {args.video}")
 
     gray = to_gray(frame)
-    lit = correct_illumination(gray, args.illumination_downsample, args.illumination_sigma)
-    final = apply_clahe(lit, args.clahe_clip, args.clahe_tile)
-    cv2.imwrite(str(args.output), np.hstack([gray, lit, final]))
-    print(f"Wrote {args.output} (grayscale | illumination-corrected | + CLAHE)")
+    if settings["enhance"]:
+        lit = (
+            correct_illumination(
+                gray, settings["illumination_downsample"], settings["illumination_sigma"]
+            )
+            if settings["correct_lighting"]
+            else gray
+        )
+        final = apply_clahe(lit, settings["clahe_clip"], settings["clahe_tile"])
+        strip = np.hstack([gray, lit, final])
+        caption = "grayscale | illumination-corrected | + CLAHE"
+    else:
+        strip = gray
+        caption = "grayscale only (enhancement off)"
+
+    cv2.imencode(".png", strip)[1].tofile(str(args.output))
+    print(f"Wrote {args.output} ({caption})")
+
+    if args.save_profile:
+        path = save_profile(args.save_profile, settings, args.name, args.notes)
+        print(f"Saved profile to {path}")
+        print(f"Use it with: --preprocess-profile {path}")
 
 
 if __name__ == "__main__":

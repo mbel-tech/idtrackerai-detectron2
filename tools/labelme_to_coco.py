@@ -41,6 +41,9 @@ except ImportError:  # pragma: no cover - cv2 is only needed for area/bbox
     cv2 = None
 
 
+RESERVED_JSON = {"sampling_manifest.json", "preprocess_profile.json", "report.json"}
+
+
 def polygon_area(points: np.ndarray) -> float:
     """Shoelace area. Not cv2.contourArea, so this works without OpenCV."""
     x, y = points[:, 0], points[:, 1]
@@ -102,9 +105,24 @@ def main():
     )
     args = parser.parse_args()
 
-    json_files = sorted(
-        p for p in args.input.glob("*.json") if p.name != "sampling_manifest.json"
+    # The folder also holds sidecar JSON written by sample_frames.py. Treating
+    # those as annotations would report them as broken ones, so skip anything
+    # that is not shaped like a LabelMe file rather than blacklisting names.
+    def is_labelme(path: Path) -> bool:
+        if path.name in RESERVED_JSON:
+            return False
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return True  # malformed: let the reader report it properly
+        return isinstance(data, dict) and "shapes" in data
+
+    json_files = sorted(p for p in args.input.glob("*.json") if is_labelme(p))
+    skipped = sorted(
+        p.name for p in args.input.glob("*.json") if not is_labelme(p)
     )
+    if skipped:
+        print(f"Ignoring non-annotation JSON: {', '.join(skipped)}")
     if not json_files:
         raise SystemExit(f"No LabelMe .json files in {args.input}")
 

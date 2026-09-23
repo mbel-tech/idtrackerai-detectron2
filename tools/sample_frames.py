@@ -125,7 +125,12 @@ def main():
         raise SystemExit(f"No videos matched {args.videos}")
 
     args.output.mkdir(parents=True, exist_ok=True)
-    enhance = fp.make_enhancer(args)
+
+    settings, notes = fp.resolve_settings(args)
+    for note in notes:
+        print(note)
+    print(f"enhancement: {fp.describe(settings)}")
+    enhance = fp.make_enhancer_from(settings)
     rng = random.Random(args.seed)
     pick = uniform_indices if args.uniform_random else stratified_indices
 
@@ -172,15 +177,26 @@ def main():
         "seed": args.seed,
         "sampling": "uniform-random" if args.uniform_random else "stratified",
         "allocation": "even" if args.even else "proportional",
-        "enhancement": fp.settings_from_args(args),
+        "enhancement": settings,
         "videos": [str(v) for v in videos],
         "frames": records,
     }
     manifest_path = args.output / "sampling_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
+    # The settings live beside the frames as a reusable profile, so the same
+    # recording setup can be prepared identically next time without retyping
+    # flags, and so the choice is reviewable and version controllable.
+    profile_path = fp.save_profile(
+        args.output / "preprocess_profile.json",
+        settings,
+        name=args.output.name,
+        notes="Written by sample_frames.py; reuse with --preprocess-profile",
+    )
+
     print(f"\n{len(records)} frames written to {args.output}")
     print(f"Manifest: {manifest_path}")
+    print(f"Profile:  {profile_path}")
     print(
         "\nNext: open this folder in LabelMe, draw one polygon per animal using a\n"
         "single consistent label, then run labelme_to_coco.py on the folder."
