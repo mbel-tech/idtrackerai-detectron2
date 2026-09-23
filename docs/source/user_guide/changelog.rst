@@ -24,6 +24,61 @@ Changelog
 
 Authors since :ref:`5.0.0`: Jordi Torrents (jordi.torrents@research.fchampalimaud.org | jordi.torrentsm@gmail.com)
 
+idtrackerai-detectron2 (this fork)
+==================================
+
+Changes made in `this fork <https://github.com/mbel-tech/idtrackerai-detectron2>`_
+and not present in upstream idtracker.ai. They are described at length in
+``VALIDATOR.md`` and ``README.md`` in the repository root, and in
+``docs/detectron2-pipeline.md``.
+
+Validator changes
+-----------------
+
+- New ``Swap with...``, ``Extend...`` and ``Merge with...`` operations in the
+  double-click dialog, backed by new ``Blob.swap_identity()``,
+  ``Blob.propagate_swap_identity()`` and ``ListOfBlobs.merge_blobs()``.
+- Undo the last twenty edits with :kbd:`Ctrl+Z`.
+- A failed save now writes the session to ``~/idtrackerai_backups`` and reports
+  it, rather than losing the work silently on a worker thread.
+- Autosave every five minutes, without progress dialogs.
+- New ``presence_intervals`` session parameter: frames in which an identity is
+  not expected to exist stop being reported as missing-identity errors.
+- Minimum-duration and identity-pair filters on the list of errors, and a
+  next-error button bound to :kbd:`N`.
+- New PCHIP interpolation mode, which cannot overshoot between fixed points.
+  The default interpolation order is now linear. :kbd:`Enter` applies an
+  interpolation, :kbd:`I` starts one, and clicking a fixed point jumps to its
+  frame.
+- The length calibration line now follows the cursor. Fixed deleting the wrong
+  calibration when two of them read the same, and fixed a calibration restored
+  from disk raising ``AttributeError``.
+- Holding a frame-step key scrubs through the video instead of stepping once.
+- New Video Info tab.
+
+Segmentation changes
+--------------------
+
+- New ``external_contours`` session parameter: animal outlines are read from a
+  sidecar file produced by an external instance-segmentation model instead of
+  being found by thresholding.
+- The Segmentation App gains a segmentation-source selector, a frame
+  enhancement panel with a live preview, and a guided panel for sampling
+  frames, annotating them and building a Detectron2 dataset.
+- The pipeline that produces the contour files ships inside the package, as
+  ``idtrackerai.extra_tools.detectron2_pipeline``, so the GUI and the command
+  line run the same code. Every stage is also an installed
+  ``idtrackerai_d2_*`` command.
+
+Packaging changes
+-----------------
+
+- Distributed as ``idtrackerai-detectron2``. The import name is unchanged, so
+  it cannot be installed alongside upstream idtracker.ai.
+- Fixed the version lookup failing under the fork's distribution name, which
+  made the package raise at import time once installed, and made every
+  tracking run raise before it started.
+
 6.0.15 (unreleased)
 ===================
 
