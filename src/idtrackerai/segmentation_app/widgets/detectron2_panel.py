@@ -94,10 +94,9 @@ class Detectron2Panel(QWidget):
 
         self.handoff = WrappedLabel()
         self.handoff.setText(
-            "Training and inference need a GPU and run in "
-            "tools/colab_detectron2_pipeline.ipynb. Upload the dataset folder "
-            "and your videos to Drive, then come back and choose "
-            "'External contours' to track with the result."
+            "Training and inference need a GPU: upload the dataset and your "
+            "videos to Drive and run the Colab notebook, then come back and "
+            "choose 'External contours'."
         )
 
         layout = QVBoxLayout()
@@ -136,7 +135,10 @@ class Detectron2Panel(QWidget):
         self.video_list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
-        self.video_list.setMaximumHeight(110)
+        # Three rows is enough to show that a list exists and to scroll it.
+        # The page has to leave room for the button that acts on the list, and
+        # a step whose own action needs scrolling to reach is a bad step.
+        self.video_list.setMaximumHeight(58)
         self.add_videos_button = QPushButton("Add videos...")
         self.add_videos_button.clicked.connect(self.add_videos)
         self.add_folder_button = QPushButton("Add folder...")
@@ -148,6 +150,7 @@ class Detectron2Panel(QWidget):
         self.video_summary = WrappedLabel()
 
         video_buttons = QHBoxLayout()
+        video_buttons.setContentsMargins(0, 0, 0, 0)
         for button in (self.add_videos_button, self.add_folder_button,
                        self.remove_videos_button, self.reset_videos_button):
             video_buttons.addWidget(button)
@@ -169,18 +172,35 @@ class Detectron2Panel(QWidget):
         self.sample_status = WrappedLabel()
         self.sample_preview = WrappedLabel(framed=True)
 
+        # Both numbers share a row: they are small, and the page has to fit
+        # the button that acts on them without scrolling.
+        self.seed_label = QLabel("Selection number")
+        counts_row = QHBoxLayout()
+        counts_row.setContentsMargins(0, 0, 0, 0)
+        counts_row.addWidget(self.n_frames, 1)
+        counts_row.addSpacing(8)
+        counts_row.addWidget(self.seed_label)
+        counts_row.addWidget(self.seed, 1)
+        counts_holder = QWidget()
+        counts_holder.setLayout(counts_row)
+
         form = QFormLayout()
-        form.addRow("Frames to sample", self.n_frames)
-        form.addRow("Selection number", self.seed)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow("Frames to sample", counts_holder)
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.frames_dir)
         row.addWidget(browse)
         holder = QWidget()
         holder.setLayout(row)
         form.addRow("Output folder", holder)
 
+        self.video_list_label = QLabel("Videos to sample from")
+
         layout = QVBoxLayout(page)
-        layout.addWidget(QLabel("Videos to sample from"))
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+        layout.addWidget(self.video_list_label)
         layout.addWidget(self.video_list)
         layout.addLayout(video_buttons)
         layout.addWidget(self.video_summary)
@@ -363,9 +383,11 @@ class Detectron2Panel(QWidget):
             0, "1. Enhancement" + (" - done" if s.profile else "")
         )
         if s.sampling_done:
-            self.sample_status.setText(
-                f"{s.n_sampled} frames in {s.frames_path}"
-            )
+            # The folder is on screen already, in the Output folder field. A
+            # full absolute path here wraps to three lines and pushes this
+            # step's own button off the bottom of the page.
+            self.sample_status.setText(f"{s.n_sampled} frames sampled.")
+            self.sample_status.setToolTip(str(s.frames_path))
             self.steps.setItemText(1, f"2. Sample frames - done ({s.n_sampled})")
         else:
             self.sample_status.setText("No frames sampled yet.")
@@ -854,6 +876,7 @@ class Detectron2Panel(QWidget):
         """Explain every control, since none of this is self-evident."""
         pairs = [
             (self.video_list, "d2_video_list"),
+            (self.video_list_label, "d2_video_list"),
             (self.add_videos_button, "d2_add_videos"),
             (self.add_folder_button, "d2_add_folder"),
             (self.remove_videos_button, "d2_remove_videos"),
@@ -861,6 +884,7 @@ class Detectron2Panel(QWidget):
             (self.video_summary, "d2_video_list"),
             (self.n_frames, "d2_n_frames"),
             (self.seed, "d2_seed"),
+            (self.seed_label, "d2_seed"),
             (self.sample_preview, "d2_preview"),
             (self.frames_dir, "d2_frames_folder"),
             (self.sample_button, "d2_n_frames"),
