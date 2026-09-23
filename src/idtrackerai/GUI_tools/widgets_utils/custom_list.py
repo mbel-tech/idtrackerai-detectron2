@@ -24,6 +24,9 @@ class CustomList(QListWidget):
     ListChanged = Signal()
     newItemSelected = Signal(object)
     removedItem = Signal(str)
+    removedItemIndex = Signal(int)
+    """Row index of the removed item. `removedItem` carries the display string,
+    which does not identify a row when two items stringify the same way."""
 
     def __init__(self, max_n_row: int = 5):
         super().__init__()
@@ -86,6 +89,7 @@ class CustomList(QListWidget):
         item = self.itemAt(self.sender().parent().pos())
         self.item_selected(None)
         self.removedItem.emit(item.data(Qt.ItemDataRole.UserRole))
+        self.removedItemIndex.emit(self.row(item))
         self.takeItem(self.row(item))
         self.clearFocus()
 

@@ -71,6 +71,9 @@ class Canvas(QWidget):
 
     click_event = Signal(CanvasMouseEvent)
     double_click_event = Signal(CanvasMouseEvent)
+    move_event = Signal(CanvasMouseEvent)
+    """Emitted on every mouse move, with or without a button held. Tools that
+    draw a preview following the cursor (the length calibrator) need it."""
     painting_time = Signal(CanvasPainter)
 
     minimum_zoom: float = 0.05
@@ -80,6 +83,8 @@ class Canvas(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Without this, mouseMoveEvent only fires while a button is held.
+        self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.zoom = 3.0
         self.centerX: float = 0.0
@@ -170,6 +175,11 @@ class Canvas(QWidget):
             )
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        self.move_event.emit(
+            CanvasMouseEvent(
+                event.buttons(), self.zoom, self.to_physical_units(event.pos())
+            )
+        )
         if self.mouse_pressed:
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             pos = event.pos()
