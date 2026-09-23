@@ -73,7 +73,7 @@ def video_frame_count(path: Path) -> int:
     return count
 
 
-def _frame_count_or_zero(path: Path) -> int:
+def frame_count_or_zero(path: Path) -> int:
     """Frame count, or 0 for a file that cannot be read as a video."""
     try:
         return max(0, video_frame_count(path))
@@ -228,7 +228,7 @@ def plan_sampling(
         raise SamplingError("No videos matched")
 
     if counts is None:
-        counts = [_frame_count_or_zero(v) for v in videos]
+        counts = [frame_count_or_zero(v) for v in videos]
     elif len(counts) != len(videos):
         raise SamplingError("Frame counts do not line up with the videos")
     counts = [max(0, int(c)) for c in counts]

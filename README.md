@@ -83,11 +83,16 @@ pipeline**. A guided panel walks through the four local stages:
    belongs to a recording setup, not to the software, so this is where you judge
    it against your own footage and save it as that setup's profile.
 2. **Sample frames** — stratified across the whole of every clip, so the model
-   sees the recording's full range rather than a clump of it.
+   sees each recording's full range rather than a clump of it. The panel keeps
+   its own list of videos to draw from, separate from the one being tracked, so
+   a model can be trained across every recording from a setup while each is
+   still tracked on its own. It shows the per-video breakdown before it runs.
 3. **Annotate** — opens LabelMe on the folder, preloaded with your class name.
 4. **Build dataset** — validates every polygon and converts to COCO, splitting
-   train and validation **by source video** so the score is not measuring
-   memorisation of near-duplicate frames.
+   train and validation **by recording** so the score is not measuring
+   memorisation of near-duplicate frames. Clips saved as pieces of one recording
+   are folded together; the grouping it inferred is shown before you build, and
+   can be overridden.
 
 You can close the app between steps; each one records what it produced, and
 status is re-derived from disk when you come back.

@@ -128,6 +128,16 @@ def dataset_main():
         default="video",
         help="'video' keeps frames from one clip on one side of the split",
     )
+    parser.add_argument(
+        "--group-by",
+        choices=("recording", "file"),
+        default="recording",
+        help=(
+            "with --split-by video: 'recording' folds the pieces of one "
+            "recording together (clip_segment_1/2/3 -> clip), 'file' keeps "
+            "every clip separate"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--labels",
@@ -157,6 +167,7 @@ def dataset_main():
         output_dir=args.output,
         val_fraction=args.val_fraction,
         split_by=args.split_by,
+        group_by=args.group_by,
         seed=args.seed,
         labels=args.labels,
         single_class=args.single_class,

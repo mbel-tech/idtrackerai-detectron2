@@ -1,6 +1,6 @@
 """Background workers for the Detectron2 preparation steps.
 
-Both follow the shape :class:`BkgComputationThread` established in
+All three follow the shape :class:`BkgComputationThread` established in
 ``bkg_widget.py``: a plain ``QThread`` subclass, parameters pushed in before
 ``start()``, progress reported through signals handed straight to the worker
 function, and ``quit()`` overridden to set a flag rather than stop the thread,
@@ -42,6 +42,7 @@ class SamplingThread(QThread):
         settings: dict,
         seed: int = 0,
         image_format: str = "png",
+        counts: list[int] | None = None,
     ) -> None:
         self.videos = videos
         self.output = output
@@ -49,6 +50,9 @@ class SamplingThread(QThread):
         self.settings = settings
         self.seed = seed
         self.image_format = image_format
+        # frame counts the panel already gathered, so the run does not reopen
+        # every clip a second time just to plan
+        self.counts = counts
         self.result = None
         self.abort = False
 
@@ -70,6 +74,7 @@ class SamplingThread(QThread):
                 image_format=self.image_format,
                 progress=self.set_progress_value.emit,
                 abort=lambda: self.abort,
+                counts=self.counts,
             )
         except PipelineError as exc:
             self.result = None
@@ -78,6 +83,49 @@ class SamplingThread(QThread):
             self.result = None
             logging.exception("Frame sampling failed")
             self.failed.emit(str(exc))
+
+
+class FrameCountThread(QThread):
+    """Counts the frames in each clip, so the preview can be instant.
+
+    Counting means opening every file, which on a folder of fifty clips from a
+    external drive takes seconds -- far too slow to do while a spinbox is being
+    dragged. It is also the part that does not change when the spinbox does, so
+    it is done once, here, and the panel keeps the answers.
+
+    A clip that will not open counts zero rather than raising: the sampling
+    step reports unreadable clips itself, and a preview is no place to fail.
+    """
+
+    counted = Signal(object)  # {Path: int}
+    set_progress_value = Signal(int)
+    set_progress_max = Signal(int)
+    failed = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.videos: list[Path] = []
+        self.counts: dict[Path, int] = {}
+        self.abort = False
+
+    def set_parameters(self, videos: list[Path]) -> None:
+        self.videos = list(videos)
+        self.counts = {}
+        self.abort = False
+
+    def quit(self):
+        self.abort = True
+
+    def run(self):
+        counts: dict[Path, int] = {}
+        self.set_progress_max.emit(max(len(self.videos), 1))
+        for i, video in enumerate(self.videos, 1):
+            if self.abort:
+                break
+            counts[video] = sampling_mod.frame_count_or_zero(video)
+            self.set_progress_value.emit(i)
+        self.counts = counts
+        self.counted.emit(counts)
 
 
 class DatasetThread(QThread):

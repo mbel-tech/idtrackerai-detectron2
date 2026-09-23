@@ -55,6 +55,19 @@ class PrepState:
     n_train: int = 0
     n_val: int = 0
     updated: str = ""
+    videos: list[str] = field(default_factory=list)
+    """The clips this corpus draws frames from.
+
+    Kept here rather than read back from the tracking session, because the two
+    are deliberately different: a corpus spans every recording from a rig,
+    while a session is the one recording being tracked.
+
+    Missing files are kept rather than pruned, so an unplugged drive does not
+    quietly empty a curated list.
+    """
+    group_by: str = "recording"
+    group_overrides: dict[str, str] = field(default_factory=dict)
+    """Corrections to the inferred train/validation grouping, ``{stem: group}``."""
 
     # --------------------------------------------------------------- on disk
     @property
@@ -93,6 +106,16 @@ class PrepState:
 
     def set_profile(self, path: Path | None) -> None:
         self.profile = self._store(path)
+
+    @property
+    def video_paths(self) -> list[Path]:
+        return [Path(v) for v in self.videos]
+
+    def set_videos(self, paths) -> None:
+        """Stored as given, and absolute: these clips often live off the rig's
+        own folder, so making them relative to the corpus root would not help
+        and would obscure where they came from."""
+        self.videos = [str(Path(p)) for p in paths]
 
     # ------------------------------------------------------------ load, save
     @classmethod

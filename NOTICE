@@ -213,7 +213,14 @@ Files added:
 
   src/idtrackerai/segmentation_app/widgets/detectron2_panel.py
   src/idtrackerai/segmentation_app/widgets/pipeline_threads.py
-      The guided preparation panel and its background workers.
+      The guided preparation panel and its background workers. The panel
+      keeps its own editable list of videos to draw annotation frames
+      from, independent of the tracking session, so one model can be
+      trained across every recording from a setup while each recording is
+      still tracked separately. It previews the per-video allocation
+      before sampling, counting frames on a background thread, and shows
+      the train/validation grouping it inferred before the dataset is
+      built.
 
   src/idtrackerai/segmentation_app/widgets/enhancement_widget.py
   src/idtrackerai/segmentation_app/widgets/enhancement_preview.py

@@ -43,8 +43,21 @@ pipeline**:
 1. **Enhancement** — Off / CLAHE / CLAHE + even lighting, previewed live on the
    frame you are looking at. Drag the raw↔enhanced slider to compare. Save it as
    this setup's profile.
-2. **Sample frames** — count, seed, output folder. Runs in the background with a
-   cancellable progress bar; a cancelled run keeps the frames it wrote.
+2. **Sample frames** — the videos to draw from, how many frames, the selection
+   number, the output folder. Runs in the background with a cancellable progress
+   bar; a cancelled run keeps the frames it wrote.
+
+   The video list is the panel's own, not the tracking session's. It starts
+   from whatever is open, and **Add videos...** / **Add folder...** extend it.
+   That separation is the point: a model should see every recording from a
+   setup, while a session is the one recording being tracked. Opening fifty
+   clips just to annotate them would make one absurd concatenated session out
+   of fifty separate experiments.
+
+   Above the button, a line says what the run would do -- how many frames from
+   how many videos, and the smallest and largest share. If the count is lower
+   than the number of videos, it says how many would get nothing at all, which
+   is the failure that most defeats the point of a collection.
 3. **Annotate** — opens LabelMe on the folder, preloaded with your class name
    and `--validate-label exact` so a typo cannot create a second class. The step
    header counts annotated frames.
@@ -94,10 +107,28 @@ External contours**.
 
 ## Things worth knowing
 
-**The train/validation split is by video, not random.** Frames sampled a second
-apart show the same animals in the same poses. Splitting those at random puts
-near-duplicates on both sides and the validation AP then measures memorisation.
-`--split-by random` exists but warns.
+**The train/validation split is by recording, not by frame.** Frames sampled a
+second apart show the same animals in the same poses. Splitting those at random
+puts near-duplicates on both sides and the validation AP then measures
+memorisation. `--split-by random` exists but warns.
+
+Splitting by *file* is not enough either when a recording was saved in pieces:
+`B3_N1_segment_1`, `_2` and `_3` are the same animals in the same arena minutes
+apart. The pieces are folded into one group, guessed from the file name by
+stripping trailing segment markers, numbers and re-encode suffixes -- so
+`B3_N1_segment_2_cleaned` also lands under `B3_N1`.
+
+That guess cannot always be right, so it is shown, not applied quietly. The
+panel prints the grouping it inferred before you build, and the control offers
+**By recording**, **By file** and **Random**; the CLI takes `--group-by`. Two
+guards catch the obvious mistakes: a name that would reduce to nothing but a
+piece-marker is left whole, because `clip_00` and `clip_01` are two recordings
+rather than two pieces of one called "clip"; and if the grouping collapses every
+clip into a single group it falls back to splitting by file and says so.
+
+Because whole groups go to one side, the validation set can only land on a group
+boundary, so the fraction you ask for is approximate. The report says what was
+actually reached when it differs by more than five points.
 
 **Annotations are validated, not trusted.** Two-point polygons, stray clicks,
 bounding boxes drawn where a polygon was meant, shapes off the image edge and

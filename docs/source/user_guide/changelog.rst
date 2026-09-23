@@ -64,6 +64,23 @@ Segmentation changes
   being found by thresholding.
 - The Segmentation App gains a segmentation-source selector and a guided panel
   for sampling frames, annotating them and building a Detectron2 dataset.
+- The preparation panel keeps its own list of videos to draw annotation frames
+  from, separate from the videos being tracked, so one model can be trained
+  across every recording from a setup while each recording is tracked on its
+  own. It shows the per-video allocation before sampling and warns when the
+  frame count is too low for every video to be represented.
+- The train/validation split now groups clips by recording rather than by file,
+  folding pieces such as ``trial_segment_1/2/3`` together. The inferred
+  grouping is shown before the dataset is built and can be overridden, with
+  ``--group-by`` on the command line.
+- Fixed sampled frames recording their source video inconsistently, which let
+  frames from one clip be counted as two sources and placed on both sides of
+  the train/validation split. Re-sampling into a folder now adds to its
+  manifest instead of replacing it.
+- Fixed the frame budget being concentrated on one clip rather than spread
+  across them, and a single unreadable file aborting a whole sampling run.
+  Clips whose file names would collide are now refused before anything is
+  written.
 - New ``enhancement`` session parameter. Frame enhancement (CLAHE and
   correction for uneven lighting) is chosen against the footage in the
   Segmentation App, with a live preview and named presets, and applies in
