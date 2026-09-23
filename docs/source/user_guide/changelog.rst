@@ -62,9 +62,15 @@ Segmentation changes
 - New ``external_contours`` session parameter: animal outlines are read from a
   sidecar file produced by an external instance-segmentation model instead of
   being found by thresholding.
-- The Segmentation App gains a segmentation-source selector, a frame
-  enhancement panel with a live preview, and a guided panel for sampling
-  frames, annotating them and building a Detectron2 dataset.
+- The Segmentation App gains a segmentation-source selector and a guided panel
+  for sampling frames, annotating them and building a Detectron2 dataset.
+- New ``enhancement`` session parameter. Frame enhancement (CLAHE and
+  correction for uneven lighting) is chosen against the footage in the
+  Segmentation App, with a live preview and named presets, and applies in
+  every segmentation mode: to the frames, to the background model and to the
+  identification images alike. It is off by default. Turning it on shifts the
+  brightness range, so intensity thresholds chosen against raw frames need
+  re-tuning; the app says so next to the thresholds.
 - The pipeline that produces the contour files ships inside the package, as
   ``idtrackerai.extra_tools.detectron2_pipeline``, so the GUI and the command
   line run the same code. Every stage is also an installed

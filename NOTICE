@@ -40,7 +40,9 @@ instance-segmentation model (a fine-tuned Detectron2 Mask R-CNN) enter
 idtracker.ai directly, instead of being rendered back into a video for
 idtracker.ai to re-threshold. Identity tracking is deliberately left as it
 was: crossing detection, fragmentation, identification and gap closing are
-unmodified.
+unmodified. Alongside it, frame enhancement (CLAHE and correction for uneven
+lighting) became a control of the Segmentation App in its own right, applied
+to thresholding as much as to the Detectron2 route.
 
 The second is to make the Validator, the tool for correcting trajectories
 by hand after tracking, usable on long recordings: an undo stack, a save
@@ -53,14 +55,24 @@ Files changed relative to the fork point:
   src/idtrackerai/base/animals_detection/segmentation.py
       process_frame() takes an optional external contour source and frame
       number, and short-circuits to contours_from_external() instead of
-      thresholding. New function contours_from_external().
+      thresholding. New function contours_from_external(). It also takes an
+      optional enhancement, applied before thresholding in place of the plain
+      greyscale conversion; generate_frame_stack() and compute_background()
+      take the same, so the background model is built from the same kind of
+      image the frames will be. New function apply_enhancement(). With no
+      enhancement given, the behaviour is unchanged.
 
   src/idtrackerai/base/animals_detection/animals_detection.py
-      Validates the contour file against the video before segmenting, and
-      disables background subtraction when external contours are in use.
+      Validates the contour file against the video before segmenting,
+      disables background subtraction when external contours are in use, and
+      passes the session's enhancement to both the background computation and
+      the segmentation.
 
   src/idtrackerai/session.py
-      New external_contours parameter, resolved and checked in
+      New enhancement parameter carrying the frame enhancement chosen in the
+      Segmentation App, so it round-trips through the session .toml and
+      reaches segmentation. New external_contours parameter, resolved and
+      checked in
       prepare_tracking(). New presence_intervals parameter recording, per
       identity, the frames in which that animal is present; the Validator
       stops reporting an identity as missing outside them. Fixed
@@ -72,12 +84,33 @@ Files changed relative to the fork point:
   src/idtrackerai/segmentation_app/tooltips.toml
       Segmentation App gains a segmentation source selector with three
       modes (thresholding, external contours, Detectron2 preparation) and
-      hosts the preparation panel and the enhancement preview.
+      hosts the preparation panel. The enhancement control sits above the
+      source selector and applies in every mode, with its live preview; a
+      caution appears beside it when enhancement is on in thresholding mode,
+      because it shifts the brightness range the intensity thresholds were
+      chosen against.
 
   src/idtrackerai/segmentation_app/widgets/frame_analyzer.py
       New set_suspended(), so the blob overlay stands down in Detectron2
       preparation mode where thresholding means nothing. With suspended
-      False the behaviour is unchanged.
+      False the behaviour is unchanged. It also segments the enhanced frame
+      when an enhancement is set, so the blob outlines match the picture
+      they are drawn on.
+
+  src/idtrackerai/segmentation_app/widgets/bkg_widget.py
+      The background computation thread carries the enhancement, and the
+      cached background model is discarded when the enhancement changes.
+
+  src/idtrackerai/segmentation_app/widgets/open_video_widget.py
+      Selected files that are filesystem metadata rather than videos are
+      dropped, with a dialog naming the first. macOS writes a "._name.mp4"
+      companion beside each file it copies onto a non-Apple drive, and
+      OpenCV reported the first of those as an unreadable video.
+
+  src/idtrackerai/utils/py_utils.py
+  src/idtrackerai/utils/__init__.py
+      New is_metadata_sidecar(), drop_metadata_sidecars() and SIDECAR_NAMES,
+      backing the above.
 
   src/idtrackerai/__init__.py
   src/idtrackerai/utils/py_utils.py
