@@ -6,6 +6,7 @@ from itertools import chain, pairwise, product
 from multiprocessing import Pool
 from pathlib import Path
 
+import cv2
 import h5py
 import numpy as np
 
@@ -81,13 +82,16 @@ class ListOfBlobs:
         list_of_blobs.reconnect()
         return list_of_blobs
 
-    def save(self, file_path: Path | str) -> None:
+    def save(self, file_path: Path | str, verbose: bool = True) -> None:
         """Saves instance of the class with Python's pickle protocol
 
         Parameters
         ----------
         file_path : Path | str
             Path where to save the object
+        verbose : bool
+            Whether to show a progress bar. The validator's autosave sets this
+            to False so a background save does not scribble over the terminal.
         """
         file_path = resolve_path(file_path)
         logging.info(f"Saving ListOfBlobs at {file_path}", stacklevel=2)
@@ -97,7 +101,7 @@ class ListOfBlobs:
         for blob in self.all_blobs:
             clean_attrs(blob)
 
-        with open_track(file_path, "wb") as file:
+        with open_track(file_path, "wb", verbose=verbose) as file:
             pickle.dump(self, file, protocol=pickle.HIGHEST_PROTOCOL)
         self.reconnect()
 
@@ -355,6 +359,53 @@ class ListOfBlobs:
         new_blob.user_generated_identities = [identity]
         new_blob.is_an_individual = True
         self.blobs_in_video[frame_number].append(new_blob)
+
+    def merge_blobs(
+        self, frame_number: int, blob_indices: Sequence[int], new_identity: int | None
+    ) -> None:
+        """[Validation] Replaces several blobs in a frame with their convex hull.
+
+        Segmentation sometimes splits one animal into two blobs: a fish whose
+        tail falls below the intensity threshold, or one partly behind a
+        structure. The tracker then sees two objects where there is one, and no
+        amount of identity editing fixes it because the geometry is wrong.
+        Merging rebuilds a single blob from the combined outline.
+
+        The merged blob is marked ``added_by_user``, like the ones
+        :meth:`add_blob` creates, so the validator's "reset" path removes it
+        rather than trying to restore identities it never had.
+
+        Parameters
+        ----------
+        frame_number : int
+            The frame in which to merge.
+        blob_indices : Sequence[int]
+            Indices into ``blobs_in_video[frame_number]`` of the blobs to merge.
+        new_identity : int | None
+            Identity to give the merged blob.
+        """
+        blobs_in_frame = self.blobs_in_video[frame_number]
+        indices = sorted(set(blob_indices), reverse=True)
+        if len(indices) < 2:
+            return
+
+        combined_contour = np.vstack([blobs_in_frame[i].contour for i in indices])
+
+        # convexHull returns (N, 1, 2); Blob wants (N, 2).
+        new_contour = cv2.convexHull(combined_contour).reshape(-1, 2)
+
+        new_blob = Blob(new_contour, frame_number)
+        new_blob.is_an_individual = True
+        new_blob.added_by_user = True
+        if new_identity is not None:
+            new_blob.user_generated_identities = [new_identity]
+            new_blob.user_generated_centroids = [new_blob.centroid]
+
+        # Descending order, so earlier deletions do not shift later indices.
+        for i in indices:
+            del blobs_in_frame[i]
+
+        blobs_in_frame.append(new_blob)
 
     # Deprecated methods
 
