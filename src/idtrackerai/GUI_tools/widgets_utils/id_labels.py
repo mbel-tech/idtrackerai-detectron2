@@ -19,6 +19,9 @@ from .other_utils import get_icon
 
 class IdLabels(QScrollArea):
     needToDraw = Signal()
+    presenceIntervalRequested = Signal(int)
+    """Emitted with the identity number when the user asks to set the frame
+    range in which that identity is present."""
     labels: list[str]
 
     def __init__(self):
@@ -129,6 +132,13 @@ class IdLabels(QScrollArea):
         copy_action.triggered.connect(
             lambda: QApplication.clipboard().setText(hex_code)
         )
+
+        presence_action = menu.addAction("Set Presence Interval")
+        assert presence_action is not None
+        presence_action.triggered.connect(
+            lambda: self.presenceIntervalRequested.emit(idx)
+        )
+
         menu.exec(btn.mapToGlobal(pos))
 
     def validate_label(self):

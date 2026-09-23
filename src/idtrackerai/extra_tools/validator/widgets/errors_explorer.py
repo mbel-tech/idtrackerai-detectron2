@@ -19,7 +19,7 @@ from qtpy.QtWidgets import (
 )
 from superqt import QToggleSwitch
 
-from idtrackerai import ListOfBlobs
+from idtrackerai import ListOfBlobs, Session
 from idtrackerai.GUI_tools import get_icon, key_event_modifier
 
 
@@ -75,6 +75,20 @@ class ErrorsExplorer(QWidget):
         self.table.cellDoubleClicked.connect(self.cell_clicked)
 
         long_jumps_row = QHBoxLayout()
+
+        long_jumps_row.addWidget(QLabel("Min duration"))
+        self.min_duration = QSpinBox()
+        self.min_duration.setValue(0)
+        self.min_duration.setSuffix(" frames")
+        self.min_duration.setSpecialValueText("all")
+        self.min_duration.setToolTip(
+            "Hide errors shorter than this. A one-frame gap in a long fragment"
+            " is usually not worth a correction."
+        )
+        self.min_duration.valueChanged.connect(self.update_list_of_errors)
+        long_jumps_row.addWidget(self.min_duration)
+        long_jumps_row.addSpacing(20)
+
         self.jumps_th_label = QToggleSwitch("Jumps threshold")
         self.jumps_th_label.setChecked(True)
         long_jumps_row.addWidget(self.jumps_th_label)
@@ -94,6 +108,31 @@ class ErrorsExplorer(QWidget):
         self.jumps_th_label.toggled.connect(self.reset_jumps.setEnabled)
         long_jumps_row.addWidget(self.reset_jumps)
 
+        pair_row = QHBoxLayout()
+        self.filter_pair_btn = QCheckBox("Filter pair")
+        self.filter_pair_btn.setToolTip(
+            "Show only errors belonging to these two identities. Two animals"
+            " that keep swapping with each other are worked on as a pair."
+            "\n\nThis also hides every No-id error, which carries no identity."
+        )
+        self.filter_pair_btn.stateChanged.connect(self.update_list_of_errors)
+        pair_row.addWidget(self.filter_pair_btn)
+
+        self.id_1 = QSpinBox()
+        self.id_1.setPrefix("ID ")
+        self.id_1.setMinimum(1)
+        self.id_1.setValue(1)
+        self.id_1.valueChanged.connect(self.update_list_of_errors)
+        pair_row.addWidget(self.id_1)
+
+        self.id_2 = QSpinBox()
+        self.id_2.setPrefix("ID ")
+        self.id_2.setMinimum(1)
+        self.id_2.setValue(2)
+        self.id_2.valueChanged.connect(self.update_list_of_errors)
+        pair_row.addWidget(self.id_2)
+        pair_row.addStretch()
+
         self.autoselect_errors = QCheckBox("Autoselect first error")
 
         layout = QVBoxLayout()
@@ -104,13 +143,22 @@ class ErrorsExplorer(QWidget):
         self.update_btn.setIcon(get_icon("refresh"))
         self.update_btn.setShortcut(Qt.Key.Key_U)
         self.update_btn.clicked.connect(self.update_list_of_errors)
+
+        self.next_error_btn = QToolButton()
+        self.next_error_btn.setText("Next [N]")
+        self.next_error_btn.setShortcut(Qt.Key.Key_N)
+        self.next_error_btn.setToolTip("Select the next error in the list")
+        self.next_error_btn.clicked.connect(self.select_next_error)
+
         self.left_label = QLabel()
         errors_header.addWidget(self.left_label)
         errors_header.addWidget(self.update_btn)
+        errors_header.addWidget(self.next_error_btn)
         layout.addLayout(errors_header)
         layout.addWidget(self.autoselect_errors)
         layout.addWidget(self.table)
         layout.addLayout(long_jumps_row)
+        layout.addLayout(pair_row)
         self.setLayout(layout)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -119,6 +167,7 @@ class ErrorsExplorer(QWidget):
         self.duplicated: np.ndarray
         self.non_accepted_jumps: np.ndarray
         self.in_tracking_interval: np.ndarray
+        self.session: Session | None = None
 
     def cell_clicked(self, row: int, col: int):
         if row < 0 or col < 0:
@@ -161,7 +210,9 @@ class ErrorsExplorer(QWidget):
         duplicated: np.ndarray,
         blobs: ListOfBlobs,
         tracking_intervals: list[list[int]] | None,
+        session: Session | None = None,
     ):
+        self.session = session
         self.trajectories = traj
         self.unidentified = unidentified
         self.duplicated = duplicated
@@ -190,14 +241,57 @@ class ErrorsExplorer(QWidget):
         if np.isnan(self.trajectories).all():
             # not finished session
             return {}
+        missing = (
+            np.isnan(self.trajectories[..., 0]) & self.in_tracking_interval[:, None]
+        )
         return {
-            "Miss id": get_list_of_Trues_for_id(
-                np.isnan(self.trajectories[..., 0]) & self.in_tracking_interval[:, None]
-            ),
+            "Miss id": get_list_of_Trues_for_id(self.mask_absent_identities(missing)),
             "No id": [(-1,) + get_list_of_Trues(self.unidentified)],
             "Dupl": get_list_of_Trues_for_id(self.duplicated),
             "Jump": self.get_impossible_jumps(),
         }
+
+    def mask_absent_identities(self, missing: np.ndarray) -> np.ndarray:
+        """Clears "missing" frames in which an identity is not expected at all.
+
+        An animal that enters the arena at frame 4000 has no trajectory before
+        it, and flagging all 4000 of those frames as errors buries the real
+        ones. The Validator lets the user declare the interval in which each
+        identity is present, and those declarations are applied here.
+
+        `missing` is `(n_frames, n_animals)`; it is modified in place and
+        returned.
+        """
+        if self.session is None or not self.session.presence_intervals:
+            return missing
+
+        for identity_idx in range(missing.shape[1]):
+            intervals = self.session.presence_intervals.get(str(identity_idx + 1))
+            if not intervals:
+                continue
+            present = np.zeros(missing.shape[0], bool)
+            for start, end in intervals:
+                # Inclusive at both ends, as the user types them.
+                present[start : end + 1] = True
+            missing[:, identity_idx] &= present
+
+        return missing
+
+    def keep_error(self, identity: int, length: int) -> bool:
+        """Whether an error survives the min-duration and pair filters."""
+        if length < self.min_duration.value():
+            return False
+        if self.filter_pair_btn.isChecked():
+            return identity in (self.id_1.value(), self.id_2.value())
+        return True
+
+    def select_next_error(self):
+        """Selects the next row, wrapping round at the end of the table."""
+        if self.table.rowCount() == 0:
+            return
+        next_row = (self.table.currentRow() + 1) % self.table.rowCount()
+        self.table.selectRow(next_row)
+        self.cell_clicked(next_row, 0)
 
     def update_list_of_errors(self):
         self.table.setSortingEnabled(False)
@@ -205,6 +299,8 @@ class ErrorsExplorer(QWidget):
         for error_kind, errors_for_id in self.getErrors().items():
             for identity, starts, lengths in errors_for_id:
                 for start, length in zip(starts, lengths):
+                    if not self.keep_error(identity, length):
+                        continue
                     self.table.insertRow(0)
                     self.table.setItem(0, 0, CustomTableWidgetItem(error_kind))
                     self.table.setItem(0, 1, CustomTableWidgetItem(identity))
