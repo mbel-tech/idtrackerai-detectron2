@@ -11,47 +11,80 @@ thresholds to tune.
 ## The pipeline
 
 ```
-   sample_frames.py        frames out of the videos, already enhanced
-          |
-     [ LabelMe ]           you draw one polygon per animal
-          |
-   labelme_to_coco.py      validate, convert, split train/val by video
-          |
-   train_detectron2.py     fine-tune Mask R-CNN, evaluate, record settings
-          |
-detectron2_export_contours.py   run the model over a clip -> contours.h5
-          |
-   [ idtracker.ai ]        external_contours = "clip_01_contours.h5"
+  LOCAL (the Segmentation App, or these scripts)
+    1  enhancement        choose it against your own footage
+    2  sample frames      spread across the whole of every clip
+    3  annotate           LabelMe, one polygon per animal
+    4  build dataset      validate, convert, split train/val by video
+                    |
+  COLAB (needs a GPU)
+    5  train              fine-tune Mask R-CNN, record the settings used
+    6  export contours    run the model over each clip -> contours.h5
+                    |
+  LOCAL
+    7  track              external_contours = "contours/clip_01.h5"
 ```
 
-`frame_preprocessing.py` is shared by the first and last stages. That is
-deliberate: the model must see the same kind of image at inference that it was
-annotated on. Training on CLAHE-enhanced frames and predicting on raw ones costs
-accuracy without raising an error, so the settings are recorded at every stage
-and checked at inference.
+Steps 1–4 are in the GUI. Steps 5–6 need a GPU and run in
+[`colab_detectron2_pipeline.ipynb`](colab_detectron2_pipeline.ipynb).
 
-## Running it
+The enhancement settings chosen in step 1 travel all the way to step 6. That is
+the point of the profile file: the model must see the same kind of image at
+inference that it was annotated on, and training on CLAHE-enhanced frames while
+predicting on raw ones costs accuracy without raising an error. The settings are
+written beside the frames, copied into the dataset, recorded with the weights,
+and adopted by the exporter unless you override them.
+
+## From the Segmentation App
+
+The shortest route. Open a video, then set **Segmentation → Detectron2
+pipeline**:
+
+1. **Enhancement** — Off / CLAHE / CLAHE + even lighting, previewed live on the
+   frame you are looking at. Drag the raw↔enhanced slider to compare. Save it as
+   this setup's profile.
+2. **Sample frames** — count, seed, output folder. Runs in the background with a
+   cancellable progress bar; a cancelled run keeps the frames it wrote.
+3. **Annotate** — opens LabelMe on the folder, preloaded with your class name
+   and `--validate-label exact` so a typo cannot create a second class. The step
+   header counts annotated frames.
+4. **Build dataset** — validates every polygon and shows the report inline.
+
+Close the app whenever you like. Each step records what it produced beside the
+data, and status is re-derived from disk on reload, so a deleted folder shows as
+incomplete rather than as a step that lies about being done.
+
+Then upload the dataset and your videos to Drive and open the notebook.
+
+## From the command line
+
+The same code, for scripting or a headless machine:
 
 ```bash
-# 1. pull frames for annotation, spread across the whole of every clip
-python tools/sample_frames.py --videos clips/*.mp4 --n-frames 600 --output annotate/
+# 1. tune the enhancement for this recording setup and save it
+python tools/frame_preprocessing.py --video clips/clip_01.mp4 --frame 500 \
+    --output check.png --save-profile setups/tank_a.json
 
-# 2. annotate in LabelMe: one polygon per animal, one consistent label
-labelme annotate/
+# 2. pull frames for annotation, spread across the whole of every clip
+python tools/sample_frames.py --videos clips/*.mp4 --n-frames 600 \
+    --output annotate/ --preprocess-profile setups/tank_a.json
 
-# 3. convert and split
+# 3. annotate in LabelMe: one polygon per animal, one consistent label
+python -m labelme annotate/ --labels fish --validate-label exact
+
+# 4. convert and split
 python tools/labelme_to_coco.py --input annotate/ --output dataset/ \
     --single-class fish --expected-instances 5 --val-fraction 0.15
 
-# 4. check the annotations landed where you think, before spending GPU time
+# 5. check the annotations landed where you think, before spending GPU time
 python tools/train_detectron2.py --dataset dataset/ --output model/ --check-dataset
 
-# 5. train
+# 6. train
 python tools/train_detectron2.py --dataset dataset/ --output model/ --epochs 40
 
-# 6. one contour file per clip
-python tools/detectron2_export_contours.py --video clips/clip_01.mp4 \
-    --weights model/model_final.pth --output contours/clip_01.h5 --max-instances 5
+# 7. one contour file per clip
+python tools/detectron2_export_contours.py --videos clips/*.mp4 \
+    --weights model/model_final.pth --output-dir contours/ --max-instances 5
 ```
 
 Then either add `external_contours = "contours/clip_01.h5"` to the clip's
@@ -100,7 +133,8 @@ the hard crossings before trusting a batch of trajectories.
 
 ## Running the GPU stages in Colab
 
-Annotation stays local. Stages 4–6 move to Colab via
+Enhancement, sampling, annotation and dataset building stay local. Training
+and contour export move to Colab via
 [`colab_detectron2_pipeline.ipynb`](colab_detectron2_pipeline.ipynb).
 
 ```bash
@@ -111,7 +145,7 @@ Upload to `MyDrive/idtrackerai_detectron2/`:
 
 ```
 colab_bundle.zip
-dataset/        from labelme_to_coco.py
+dataset/        from the GUI's step 4, or labelme_to_coco.py
 ```
 
 **The videos must be on Drive too.** Inference decodes every frame, so the clips
@@ -164,7 +198,9 @@ processing throughout is [OpenCV](https://opencv.org).
 
 ## Installing Detectron2
 
-Only stages 4–6 need it; sampling and conversion run on OpenCV and NumPy alone.
+Only training and contour export need it. Everything the GUI does — enhancement,
+sampling, dataset building — runs on OpenCV and NumPy alone, so the Segmentation
+App works without Detectron2 installed.
 
 ```bash
 pip install 'torch>=2.1' torchvision --index-url https://download.pytorch.org/whl/cu121

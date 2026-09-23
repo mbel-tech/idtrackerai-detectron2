@@ -57,33 +57,71 @@ Files changed relative to the fork point:
 
   src/idtrackerai/segmentation_app/main.py
   src/idtrackerai/segmentation_app/widgets/__init__.py
-  src/idtrackerai/segmentation_app/widgets/frame_analyzer.py
   src/idtrackerai/segmentation_app/tooltips.toml
-      Segmentation App gains a source selector for choosing between
-      thresholding and external contours.
+      Segmentation App gains a segmentation source selector with three
+      modes (thresholding, external contours, Detectron2 preparation) and
+      hosts the preparation panel and the enhancement preview.
+
+  src/idtrackerai/segmentation_app/widgets/frame_analyzer.py
+      New set_suspended(), so the blob overlay stands down in Detectron2
+      preparation mode where thresholding means nothing. With suspended
+      False the behaviour is unchanged.
+
+  src/idtrackerai/__init__.py
+  src/idtrackerai/utils/py_utils.py
+  src/idtrackerai/utils/__init__.py
+  src/idtrackerai/utils/logging_utils.py
+  src/idtrackerai/utils/telemetry.py
+  src/idtrackerai/start/__main__.py
+      New idtrackerai_version(), which asks importlib.metadata which
+      distribution provides this package instead of assuming it is called
+      "idtrackerai". Required by the rename below: without it the package
+      raises PackageNotFoundError at import time once installed.
 
   pyproject.toml
       Distribution renamed to idtrackerai-detectron2 to distinguish it
-      from the upstream release. The import name idtrackerai is unchanged.
+      from the upstream release. The import name idtrackerai is unchanged,
+      so the two cannot share an environment. LabelMe added as a
+      dependency, since annotation is a required stage of this pipeline.
 
   README.md
       Replaced. The upstream README is preserved as README.idtrackerai.md.
+
+  CONTRIBUTING.md
+      Prefaced with a notice redirecting reports about this fork here
+      rather than to the upstream issue tracker. Otherwise unchanged.
 
 Files added:
 
   src/idtrackerai/base/animals_detection/external_contours.py
       Sidecar contour format and reader.
 
+  src/idtrackerai/extra_tools/detectron2_pipeline/
+      The pipeline that produces the contour files: frame enhancement,
+      stratified frame sampling for annotation, LabelMe to COCO
+      conversion, and the state that lets a preparation be resumed. Lives
+      in the package so the GUI and the command-line scripts run the same
+      code rather than two copies that drift.
+
   src/idtrackerai/segmentation_app/widgets/segmentation_source.py
       The segmentation source selector widget.
 
+  src/idtrackerai/segmentation_app/widgets/detectron2_panel.py
+  src/idtrackerai/segmentation_app/widgets/pipeline_threads.py
+      The guided preparation panel and its background workers.
+
+  src/idtrackerai/segmentation_app/widgets/enhancement_widget.py
+  src/idtrackerai/segmentation_app/widgets/enhancement_preview.py
+      Enhancement controls, and the live preview that overdraws the
+      enhanced frame on the video player.
+
   tests/external_contours_test.py
-      Tests for the above.
+      Tests for the sidecar format and the segmentation path.
 
   tools/
-      Pipeline that produces the contour files: frame sampling for
-      annotation, LabelMe to COCO conversion, Mask R-CNN fine-tuning,
-      batch inference, video preflight, and a Colab notebook.
+      Command-line front ends over the package, plus the GPU stages that
+      run on Colab: Mask R-CNN fine-tuning, batch inference, video
+      preflight, the Colab bundle builder, and the notebook itself.
 
   docs/Automated behaviour tracking workflow.txt
       Methods write-up for the earlier enhanced-video workflow this

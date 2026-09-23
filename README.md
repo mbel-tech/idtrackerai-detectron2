@@ -73,7 +73,33 @@ pip install git+https://github.com/mbel-tech/idtrackerai-detectron2
 The import name is unchanged (`import idtrackerai`), so it cannot be installed
 alongside upstream idtracker.ai in the same environment.
 
-Point a session at a contour file, in the `.toml`:
+### Preparing a model
+
+Open a video in the Segmentation App and set **Segmentation → Detectron2
+pipeline**. A guided panel walks through the four local stages:
+
+1. **Enhancement** — CLAHE and illumination correction, previewed live on the
+   frame you are looking at, with a raw↔enhanced slider to compare. Enhancement
+   belongs to a recording setup, not to the software, so this is where you judge
+   it against your own footage and save it as that setup's profile.
+2. **Sample frames** — stratified across the whole of every clip, so the model
+   sees the recording's full range rather than a clump of it.
+3. **Annotate** — opens LabelMe on the folder, preloaded with your class name.
+4. **Build dataset** — validates every polygon and converts to COCO, splitting
+   train and validation **by source video** so the score is not measuring
+   memorisation of near-duplicate frames.
+
+You can close the app between steps; each one records what it produced, and
+status is re-derived from disk when you come back.
+
+Training and inference need a GPU and run in
+[`tools/colab_detectron2_pipeline.ipynb`](tools/colab_detectron2_pipeline.ipynb).
+The same stages are available as command-line scripts — see
+**[tools/README.md](tools/README.md)**.
+
+### Tracking with the result
+
+Point a session at the contour file, in the `.toml`:
 
 ```toml
 external_contours = "contours/clip_01.h5"
@@ -82,10 +108,6 @@ external_contours = "contours/clip_01.h5"
 …or pick it in the Segmentation App under **Segmentation → External contours**.
 The intensity thresholds and background subtraction grey out, because they take
 no part once contours come from a model.
-
-Producing the contour files — sampling frames for annotation, converting LabelMe
-polygons to COCO, fine-tuning, and batch inference (including on Colab) — is
-covered in **[tools/README.md](tools/README.md)**.
 
 ## Citing
 
