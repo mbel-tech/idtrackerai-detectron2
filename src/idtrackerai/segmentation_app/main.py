@@ -31,6 +31,7 @@ from .widgets import (
     AreaThresholds,
     BkgWidget,
     BlobInfoWidget,
+    Detectron2Panel,
     EnhancementPreview,
     EnhancementWidget,
     FrameAnalyzer,
@@ -76,7 +77,10 @@ class SegmentationGUI(GUIBase):
         self.segmentation_source = SegmentationSourceWidget()
         self.enhancement = EnhancementWidget()
         self.enhancement_preview = EnhancementPreview()
-        self.enhancement.setVisible(False)
+        self.detectron2_panel = Detectron2Panel(self.enhancement)
+        self.detectron2_panel.setVisible(False)
+        # so GUIBase.closeEvent gives it a chance to stop threads and save
+        self.widgets_to_close.append(self.detectron2_panel)
         self.intensity_thresholds = IntensityThresholds(self, min=0, max=255)
         self.area_thresholds = AreaThresholds()
 
@@ -169,7 +173,7 @@ class SegmentationGUI(GUIBase):
         self.ROI_Widget.exclusive_rois.setToolTip(tooltips["exclusive_rois"])
         self.segmentation_source.setToolTip(tooltips["segmentation_source"])
         self.segmentation_source.browse.setToolTip(tooltips["external_contours"])
-        self.enhancement.setToolTip(tooltips["detectron2_enhancement"])
+        self.detectron2_panel.setToolTip(tooltips["detectron2_enhancement"])
         self.bkg_widget.setToolTip(tooltips["background_subtraction"])
         self.bkg_widget.bkg_stat.setToolTip(tooltips["background_stat"])
         self.bkg_widget.view_bkg.setToolTip(tooltips["background_view"])
@@ -198,7 +202,7 @@ class SegmentationGUI(GUIBase):
             QHLine(),
             n_animals_row,
             self.segmentation_source,
-            self.enhancement,
+            self.detectron2_panel,
             self.bkg_widget,
             self.intensity_thresholds,
             self.area_thresholds,
@@ -269,7 +273,7 @@ class SegmentationGUI(GUIBase):
         external = mode == EXTERNAL
         detectron2 = mode == DETECTRON2
 
-        self.enhancement.setVisible(detectron2)
+        self.detectron2_panel.setVisible(detectron2)
         self.enhancement_preview.set_enabled(detectron2)
         self.frame_analyzer.set_suspended(detectron2)
 
@@ -449,6 +453,7 @@ class SegmentationGUI(GUIBase):
         )
         self.ROI_Widget.set_video_size(video_size)
         self.segmentation_source.set_video_info(n_frames, video_size)
+        self.detectron2_panel.set_video_context(video_paths, self.session.output_dir)
         self.videoPlayer.setEnabled(False)
         self.tracking_interval.reset(n_frames)
         self.frame_analyzer.drawn_frame = -1
