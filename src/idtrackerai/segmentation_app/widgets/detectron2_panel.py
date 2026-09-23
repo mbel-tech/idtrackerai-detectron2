@@ -83,15 +83,21 @@ class Detectron2Panel(QWidget):
         layout.addWidget(self.handoff)
 
         self._wire_threads()
-        self.enhancement.settingsCommitted.connect(self._enhancement_committed)
         self.enhancement.profileSaved.connect(self._profile_saved)
+        self.enhancement_committed(self.enhancement.settings())
 
     # ------------------------------------------------------------------ pages
     def _enhancement_page(self) -> QWidget:
+        """The enhancement lives above, as its own control.
+
+        It applies to thresholding as well as to this pipeline, so it is not
+        owned by this panel. This page just says where it is and what the
+        current choice means for the frames about to be sampled.
+        """
         page = QWidget()
+        self.enhancement_status = WrappedLabel()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.enhancement)
+        layout.addWidget(self.enhancement_status)
         return page
 
     def _sampling_page(self) -> QWidget:
@@ -113,7 +119,7 @@ class Detectron2Panel(QWidget):
 
         form = QFormLayout()
         form.addRow("Frames to sample", self.n_frames)
-        form.addRow("Seed", self.seed)
+        form.addRow("Selection number", self.seed)
         row = QHBoxLayout()
         row.addWidget(self.frames_dir)
         row.addWidget(browse)
@@ -259,7 +265,13 @@ class Detectron2Panel(QWidget):
         self.build_button.setEnabled(s.annotated > 0)
 
     # ----------------------------------------------------------------- step 1
-    def _enhancement_committed(self, settings: dict) -> None:
+    def enhancement_committed(self, settings: dict) -> None:
+        """Record what the frames will be prepared with, and say so."""
+        self.enhancement_status.setText(
+            "Set with the Frame enhancement control above, which applies to "
+            "thresholding too.\n\nFrames sampled for annotation will be "
+            f"written with: {fp.describe(settings)}"
+        )
         if self.state is None:
             return
         self.state.enhancement = settings
@@ -477,6 +489,28 @@ class Detectron2Panel(QWidget):
 
     def _thread_failed(self, message: str) -> None:
         QMessageBox.critical(self, "Step failed", message)
+
+    # --------------------------------------------------------------- tooltips
+    def setToolTips(self, tips: dict) -> None:
+        """Explain every control, since none of this is self-evident."""
+        pairs = [
+            (self.n_frames, "d2_n_frames"),
+            (self.seed, "d2_seed"),
+            (self.frames_dir, "d2_frames_folder"),
+            (self.sample_button, "d2_n_frames"),
+            (self.class_name, "d2_class_name"),
+            (self.launch_button, "d2_labelme"),
+            (self.open_folder_button, "d2_open_folder"),
+            (self.expected_instances, "d2_expected"),
+            (self.val_fraction, "d2_val_fraction"),
+            (self.dataset_dir, "d2_dataset_folder"),
+            (self.build_button, "d2_build"),
+            (self.enhancement_status, "enhancement"),
+        ]
+        for widget, key in pairs:
+            if key in tips:
+                widget.setToolTip(tips[key])
+
 
     # ----------------------------------------------------------------- closing
     def close(self) -> bool:

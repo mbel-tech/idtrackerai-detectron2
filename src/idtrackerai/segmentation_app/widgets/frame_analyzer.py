@@ -40,6 +40,16 @@ class FrameAnalyzer(QWidget):
         self.need_to_redraw = True
         self.new_parameters.emit()
 
+    def set_enhancement(self, enhancement: dict | None):
+        """Segment the enhanced image, not the raw one.
+
+        Without this the preview would show one picture and the blue polygons
+        would be derived from another.
+        """
+        self.enhancement = enhancement
+        self.need_to_redraw = True
+        self.new_parameters.emit()
+
     def set_suspended(self, suspended: bool):
         """Stop segmenting and drawing entirely.
 
@@ -64,6 +74,7 @@ class FrameAnalyzer(QWidget):
         self.ROI_mask = None
         self.external_contours: Path | str | None = None
         self.suspended = False
+        self.enhancement: dict | None = None
         self.intensity_ths = [0, 1]
         self.area_ths = [1, 1]
         self.blob_polygons: list[list[QPoint]] = []
@@ -81,6 +92,7 @@ class FrameAnalyzer(QWidget):
                 area_ths=self.area_ths,
                 external_contours=self.external_contours,
                 frame_number=frame_number,
+                enhancement=self.enhancement,
             )
 
         self.n_blobs = len(contours)

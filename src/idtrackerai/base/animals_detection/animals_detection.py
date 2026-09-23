@@ -38,8 +38,14 @@ def animals_detection_API(session: Session) -> ListOfBlobs:
         if bkg_model is None:
             stat = session.background_subtraction_stat
             if stat.lower() in ("median", "mean", "max", "min"):
+                # the background must be built from the same kind of image
+                # the frames will be, or subtraction compares an enhanced
+                # frame against a raw background
                 bkg_model = compute_background(
-                    session.episodes, session.number_of_frames_for_background, stat
+                    session.episodes,
+                    session.number_of_frames_for_background,
+                    stat,
+                    enhancement=session.enhancement,
                 )
             else:
                 bkg_model = load_custom_background(stat, session.video_paths[0])
@@ -63,6 +69,7 @@ def animals_detection_API(session: Session) -> ListOfBlobs:
             "ROI_mask": session.ROI_mask,
             "bkg_model": bkg_model,
             "external_contours": session.external_contours,
+            "enhancement": session.enhancement,
         },
         session.episodes,
         None if session.bounding_box_images_in_ram else session.bbox_images_folder,

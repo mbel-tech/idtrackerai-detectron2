@@ -89,6 +89,13 @@ class Session:
     number_of_animals: int = 0
     intensity_ths: None | Sequence[float] = None
     area_ths: None | Sequence[float] = None
+    enhancement: None | dict = None
+    """Frame enhancement applied before segmentation: CLAHE and correction for
+    uneven lighting. A property of the recording setup rather than of the
+    software, so it is chosen against the footage in the Segmentation App and
+    saved as that setup's profile. Applied to the frames, to the background
+    model and to the identification images alike, so everything downstream
+    sees the same picture."""
     external_contours: None | Path | str = None
     """Path to a sidecar file of contours computed by an external
     instance-segmentation model (see

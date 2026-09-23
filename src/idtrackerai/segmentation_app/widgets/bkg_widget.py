@@ -45,6 +45,7 @@ class BkgComputationThread(QThread):
         self.frame_stack = None
         self.bkg = None
         self.abort = False
+        self.enhancement: dict | None = None
 
     def setStat(self, stat: str):
         if stat.lower() in ("median", "mean", "max", "min"):
@@ -82,6 +83,7 @@ class BkgComputationThread(QThread):
                 self.n_frames_for_background,
                 self.set_progress_value,
                 lambda: self.abort,
+                enhancement=self.enhancement,
             )
         if self.abort:
             self.frame_stack = None

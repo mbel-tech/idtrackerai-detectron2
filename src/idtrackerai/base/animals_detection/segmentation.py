@@ -20,6 +20,8 @@ from idtrackerai.utils import (
     wrap_entrypoint,
 )
 
+from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
+
 from .external_contours import get_external_contours
 
 
@@ -160,6 +162,22 @@ def get_blobs_in_frame(
     return blobs_in_frame
 
 
+def apply_enhancement(frame: np.ndarray, enhancement: dict) -> np.ndarray:
+    """Grayscale plus the configured enhancement, in one place.
+
+    Used by segmentation, by the background model and by the GUI preview, so
+    all three agree on what the image looks like.
+    """
+    return fp.enhance(
+        frame,
+        clahe_clip=enhancement["clahe_clip"],
+        clahe_tile=enhancement["clahe_tile"],
+        downsample=enhancement["illumination_downsample"],
+        sigma=enhancement["illumination_sigma"],
+        correct_lighting=enhancement["correct_lighting"],
+    )
+
+
 def process_frame(
     frame: np.ndarray,
     intensity_ths: Sequence[float],
@@ -168,9 +186,16 @@ def process_frame(
     bkg_model: np.ndarray | None = None,
     external_contours: Path | str | None = None,
     frame_number: int = -1,
+    enhancement: dict | None = None,
 ) -> tuple[list[int], list[np.ndarray], np.ndarray]:
-    # Convert the frame to gray scale
-    frame = to_gray_scale(frame)
+    # Enhancement, when configured, happens before anything else so that the
+    # thresholds, the background comparison and the identification images all
+    # see the same image the user judged in the preview. Applying it only to
+    # the display would make the preview disagree with the blobs it draws.
+    if enhancement and enhancement.get("enhance", True):
+        frame = apply_enhancement(frame, enhancement)
+    else:
+        frame = to_gray_scale(frame)
 
     if external_contours is not None:
         # Contours come from an external instance-segmentation model. The frame
@@ -317,6 +342,7 @@ def generate_frame_stack(
     n_frames_for_background: int,
     progress_bar=None,
     abort: Callable = lambda: False,
+    enhancement: dict | None = None,
 ) -> np.ndarray | None:
     logging.info(
         "Generating frame stack for background subtraction with"
@@ -357,7 +383,11 @@ def generate_frame_stack(
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
         ret, frame = cap.read()
         if ret:
-            frame_stack[i] = to_gray_scale(frame)
+            frame_stack[i] = (
+                apply_enhancement(frame, enhancement)
+                if enhancement and enhancement.get("enhance", True)
+                else to_gray_scale(frame)
+            )
         else:
             logging.error(
                 f"OpenCV could not read frame {frame_number} of"
@@ -400,7 +430,11 @@ def generate_background_from_frame_stack(
 
 
 def compute_background(
-    episodes: list[Episode], n_frames_for_background: int, stat: str, progress_bar=None
+    episodes: list[Episode],
+    n_frames_for_background: int,
+    stat: str,
+    progress_bar=None,
+    enhancement: dict | None = None,
 ) -> np.ndarray | None:
     """
     Computes the background model by sampling `n_frames_for_background` frames
@@ -422,7 +456,9 @@ def compute_background(
         Background model
     """
 
-    frame_stack = generate_frame_stack(episodes, n_frames_for_background, progress_bar)
+    frame_stack = generate_frame_stack(
+        episodes, n_frames_for_background, progress_bar, enhancement=enhancement
+    )
 
     if frame_stack is None:
         return None

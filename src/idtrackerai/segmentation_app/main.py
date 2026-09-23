@@ -41,7 +41,7 @@ from .widgets import (
     SegmentationSourceWidget,
     TrackingIntervalsWidget,
 )
-from .widgets.segmentation_source import DETECTRON2, EXTERNAL
+from .widgets.segmentation_source import DETECTRON2, EXTERNAL, THRESHOLDING
 
 
 class SegmentationGUI(GUIBase):
@@ -78,6 +78,9 @@ class SegmentationGUI(GUIBase):
         self.enhancement = EnhancementWidget()
         self.enhancement_preview = EnhancementPreview()
         self.detectron2_panel = Detectron2Panel(self.enhancement)
+        # the preview is live in every mode, because the enhancement is applied
+        # to segmentation in every mode
+        self.enhancement_preview.set_enabled(True)
         self.detectron2_panel.setVisible(False)
         # so GUIBase.closeEvent gives it a chance to stop threads and save
         self.widgets_to_close.append(self.detectron2_panel)
@@ -149,7 +152,9 @@ class SegmentationGUI(GUIBase):
         self.frame_analyzer.new_parameters.connect(self.videoPlayer.update)
         self.segmentation_source.modeChanged.connect(self.segmentation_mode_changed)
         self.enhancement.settingsChanged.connect(self.enhancement_preview.set_settings)
-        self.enhancement.settingsChanged.connect(lambda _s: self.videoPlayer.update())
+        self.enhancement.settingsChanged.connect(self.frame_analyzer.set_enhancement)
+        self.enhancement.settingsChanged.connect(lambda _s: self.update_enhancement_hint())
+        self.enhancement.settingsCommitted.connect(self.enhancement_committed)
         self.enhancement.splitChanged.connect(self.enhancement_preview.set_split)
         self.enhancement.splitChanged.connect(lambda _v: self.videoPlayer.update())
         self.enhancement_preview.failed.connect(self.enhancement.show_error)
@@ -173,7 +178,8 @@ class SegmentationGUI(GUIBase):
         self.ROI_Widget.exclusive_rois.setToolTip(tooltips["exclusive_rois"])
         self.segmentation_source.setToolTip(tooltips["segmentation_source"])
         self.segmentation_source.browse.setToolTip(tooltips["external_contours"])
-        self.detectron2_panel.setToolTip(tooltips["detectron2_enhancement"])
+        self.enhancement.setToolTips(tooltips)
+        self.detectron2_panel.setToolTips(tooltips)
         self.bkg_widget.setToolTip(tooltips["background_subtraction"])
         self.bkg_widget.bkg_stat.setToolTip(tooltips["background_stat"])
         self.bkg_widget.view_bkg.setToolTip(tooltips["background_view"])
@@ -201,6 +207,7 @@ class SegmentationGUI(GUIBase):
             self.ROI_Widget,
             QHLine(),
             n_animals_row,
+            self.enhancement,
             self.segmentation_source,
             self.detectron2_panel,
             self.bkg_widget,
@@ -254,6 +261,36 @@ class SegmentationGUI(GUIBase):
             widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         QTimer.singleShot(0, self.load_parameters)
 
+    def update_enhancement_hint(self) -> None:
+        """Warn that enhancement moves the ground the thresholds stand on.
+
+        Enhancement re-centres the image on mid-grey with a different spread,
+        so an intensity threshold chosen for the raw frames no longer means
+        what it did and will usually detect far too much. The blob count makes
+        that visible, but only if you know to look.
+        """
+        enhancing = self.enhancement.settings().get("enhance", False)
+        thresholding = self.segmentation_source.mode() == THRESHOLDING
+        if enhancing and thresholding:
+            self.enhancement.set_hint(
+                "Enhancement changes the brightness range, so the blob "
+                "intensity thresholds below need re-tuning. Watch the blob "
+                "count while you adjust them."
+            )
+        else:
+            self.enhancement.set_hint("")
+
+    def enhancement_committed(self, settings: dict) -> None:
+        """Carry the settings to everything that derives from the pixels.
+
+        A background model computed from differently enhanced frames is stale,
+        so it is discarded rather than compared against the new ones.
+        """
+        self.bkg_widget.bkg_thread.enhancement = settings
+        self.bkg_widget.bkg_thread.bkg = None
+        self.bkg_widget.bkg_thread.frame_stack = None
+        self.detectron2_panel.enhancement_committed(settings)
+
     def segmentation_source_changed(self, path: Path | None) -> None:
         """Keeps the preview in step with the chosen contour file."""
         self.frame_analyzer.set_external_contours(path)
@@ -274,7 +311,6 @@ class SegmentationGUI(GUIBase):
         detectron2 = mode == DETECTRON2
 
         self.detectron2_panel.setVisible(detectron2)
-        self.enhancement_preview.set_enabled(detectron2)
         self.frame_analyzer.set_suspended(detectron2)
 
         for widget in (self.intensity_thresholds, self.bkg_widget):
@@ -283,8 +319,7 @@ class SegmentationGUI(GUIBase):
         for widget in (self.area_thresholds, self.blobInfo):
             widget.setVisible(not detectron2)
 
-        if detectron2:
-            self.enhancement_preview.set_settings(self.enhancement.settings())
+        self.update_enhancement_hint()
         self.videoPlayer.update()
 
     def manageDropedPaths(self, paths: Sequence[str]) -> None:
@@ -295,6 +330,7 @@ class SegmentationGUI(GUIBase):
         self.open_widget.open_video_paths(self.session.video_paths)
         self.tracking_interval.setValue(self.session.tracking_intervals)
         self.ROI_Widget.setValue(self.session.roi_list, self.session.exclusive_rois)
+        self.enhancement.setSettings(self.session.enhancement)
         self.segmentation_source.setValue(self.session.external_contours)
         self.intensity_thresholds.setValue(self.session.intensity_ths)
         self.area_thresholds.setValue(self.session.area_ths)
@@ -372,6 +408,10 @@ class SegmentationGUI(GUIBase):
             "track_wo_identities": self.track_wo_id.isChecked(),
             "roi_list": self.ROI_Widget.getValue(),
         }
+
+        settings = self.enhancement.settings()
+        if settings.get("enhance"):
+            out["enhancement"] = settings
 
         external_contours = self.segmentation_source.value()
         if external_contours is not None:
