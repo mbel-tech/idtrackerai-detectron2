@@ -15,7 +15,7 @@ from qtpy.QtWidgets import (
     QToolButton,
     QVBoxLayout,
 )
-from scipy.interpolate import BSpline, make_interp_spline
+from scipy.interpolate import BSpline, PchipInterpolator, make_interp_spline
 
 from idtrackerai import ListOfBlobs
 from idtrackerai.GUI_tools import (
@@ -46,6 +46,15 @@ class CustomComboBox(QComboBox):
 
 class Interpolator(QGroupBox):
     interpolation_kinds = {"Linear": 1, "Quadratic": 2, "Cubic": 3, "5th order": 5}
+    """Spline orders passed to `make_interp_spline`, by display name."""
+    PCHIP = "PCHIP"
+    """A shape-preserving alternative to the splines above.
+
+    A high-order spline through widely spaced fixed points overshoots between
+    them, which for a fish means an interpolated path that leaves the tank and
+    comes back. PCHIP is monotone between consecutive points, so it cannot.
+    It has no order, which is why it is kept out of `interpolation_kinds`.
+    """
     need_to_draw = Signal()
     update_trajectories = Signal(int, int, bool)  # start, end, update_errors
     go_to_frame = Signal(int)
@@ -87,8 +96,12 @@ class Interpolator(QGroupBox):
         layout.addLayout(range_row)
 
         self.interpolation_order_box = CustomComboBox()
-        self.interpolation_order_box.addItems(self.interpolation_kinds.keys())
-        self.interpolation_order_box.setCurrentText("Cubic")
+        self.interpolation_order_box.addItems(
+            [*self.interpolation_kinds.keys(), self.PCHIP]
+        )
+        # Linear cannot invent motion that is not between the two fixed points,
+        # which is the safer default when filling a short gap.
+        self.interpolation_order_box.setCurrentText("Linear")
         self.interpolation_order_box.currentTextChanged.connect(self.new_interp_type)
         order_row = QHBoxLayout()
         self.interpolation_order_label = WrappedLabel("Spline order")
@@ -120,15 +133,18 @@ class Interpolator(QGroupBox):
         self.abort_btn.clicked.connect(self.abort_interpolation)
         apply_row.addWidget(self.abort_btn)
 
-        self.apply_btn = QPushButton(get_icon("ok"), "Apply [Ctrl+A]")
+        self.apply_btn = QPushButton(get_icon("ok"), "Apply [Ctrl+A / Enter]")
         self.apply_btn.setShortcut("Ctrl+A")
         self.apply_btn.clicked.connect(self.apply_interpolation)
+        self.apply_btn.setDefault(True)
         apply_row.addWidget(self.apply_btn)
 
         layout.addLayout(apply_row)
 
         self.setActivated(False)
         self.animal_id: int = -1
+        self.undo_manager = None
+        """Set by ValidationGUI so an applied interpolation can be undone."""
 
     def trajectories_have_been_updated(self) -> None:
         if self.isEnabled():
@@ -142,13 +158,29 @@ class Interpolator(QGroupBox):
         if a0.type() == QEvent.Type.EnabledChange:
             self.enabled_changed.emit(self.isEnabled())
 
-    def new_interp_type(self, kind: str) -> None:
-        self.interp_spline = make_interp_spline(
+    def build_spline(self, kind: str):
+        """The callable that maps frame numbers to positions.
+
+        `make_interp_spline` fits both coordinates at once; `PchipInterpolator`
+        does not, so the PCHIP branch fits x and y separately and stacks them
+        back into the `(n, 2)` shape the rest of the widget expects.
+        """
+        if kind == self.PCHIP:
+            interp_x = PchipInterpolator(self.interp_frames, self.interp_points[:, 0])
+            interp_y = PchipInterpolator(self.interp_frames, self.interp_points[:, 1])
+            return lambda frames: np.stack(
+                [interp_x(frames), interp_y(frames)], axis=-1
+            )
+
+        return make_interp_spline(
             self.interp_frames,
             self.interp_points,
             k=self.interpolation_kinds[kind],
             check_finite=False,
         )
+
+    def new_interp_type(self, kind: str) -> None:
+        self.interp_spline = self.build_spline(kind)
         self.need_to_draw.emit()
 
     def new_input_size(self) -> None:
@@ -225,11 +257,8 @@ class Interpolator(QGroupBox):
         ]
         try:
             self.interp_points = self.trajectories[self.interp_frames, self.animal_id]
-            self.interp_spline = make_interp_spline(
-                self.interp_frames,
-                self.interp_points,
-                k=self.interpolation_kinds[self.interpolation_order_box.currentText()],
-                check_finite=False,
+            self.interp_spline = self.build_spline(
+                self.interpolation_order_box.currentText()
             )
         except ValueError as exc:
             self.setActivated(False)
@@ -305,10 +334,19 @@ class Interpolator(QGroupBox):
             self.end = self.n_frames
             self.go_to_frame.emit(self.n_frames)
 
+    SELECT_POINT_DIST = 20
+    """How near, in video pixels, a left click has to be to jump to a point."""
+
     def click_event(self, event: CanvasMouseEvent) -> None:
+        if not self.isEnabled():
+            return
+
+        if event.button == Qt.MouseButton.LeftButton:
+            self.go_to_clicked_point(event)
+            return
+
         if (
             event.button != Qt.MouseButton.RightButton
-            or not self.isEnabled()
             or self.current_frame not in self.interpolation_range
         ):
             return
@@ -326,6 +364,27 @@ class Interpolator(QGroupBox):
                 self.current_frame, self.animal_id + 1, event.xy_data
             )
         self.update_trajectories.emit(self.current_frame, self.current_frame + 1, False)
+
+    def go_to_clicked_point(self, event: CanvasMouseEvent) -> None:
+        """Jumps to the frame of the interpolation point nearest the click.
+
+        The fixed points are drawn on the canvas, so they are the natural thing
+        to click when checking what the interpolation is anchored to. Without
+        this, reaching one means reading its frame number off the drawing and
+        typing it into the player.
+        """
+        if getattr(self, "interp_points", None) is None or len(self.interp_points) == 0:
+            return
+
+        # NaN distances compare False, so missing points never win.
+        distances = np.linalg.norm(self.interp_points - np.array(event.xy_data), axis=1)
+        nearest = int(np.argmin(distances))
+        if not distances[nearest] < self.SELECT_POINT_DIST:
+            return
+
+        target_frame = int(self.interp_frames[nearest])
+        if target_frame != self.current_frame:
+            self.go_to_frame.emit(target_frame)
 
     def setActivated(self, activated: bool) -> None:
         self.setEnabled(activated)
@@ -345,6 +404,14 @@ class Interpolator(QGroupBox):
 
     def apply_interpolation(self) -> None:
         logging.debug("Apply interpolation")
+
+        if self.undo_manager is not None:
+            self.undo_manager.push_frames(
+                f"Interpolate identity {self.animal_id + 1}"
+                f" ({self.start}-{self.end})",
+                self.interpolation_range,
+            )
+
         for new_centroid, frame in zip(
             self.interp_spline(self.interpolation_range), self.interpolation_range
         ):
@@ -353,6 +420,9 @@ class Interpolator(QGroupBox):
         self.setActivated(False)
         self.interpolation_accepted.emit()
         self.update_trajectories.emit(self.start, self.end, True)
+        # Land on the far side of the gap that was just filled, which is where
+        # the next error usually is.
+        self.go_to_frame.emit(self.end)
 
     @property
     def start(self) -> int:
