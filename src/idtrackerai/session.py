@@ -165,7 +165,7 @@ class Session:
         """Initializes the session object, checking all parameters"""
         logging.debug("Initializing Session")
         try:
-            self.version = metadata.version("idtrackerai")
+            self.version = idtrackerai_version()
         except metadata.PackageNotFoundError:
             raise IdtrackeraiError("idtrackerai package is not installed")
 

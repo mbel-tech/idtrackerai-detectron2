@@ -17,6 +17,8 @@ from urllib.request import urlopen
 
 from requests import post
 
+from .py_utils import idtrackerai_version
+
 ANALYTICS_STATE_FILE_PATH = Path(__file__).parent / "usage_analytics_state.json"
 ANALYTICS_URL = "https://analytics.polaviejalab.org/report_usage.php"
 PYPI_URL = "https://pypi.org/simple/idtrackerai"
@@ -88,7 +90,7 @@ def report_usage() -> None:
             json={
                 "date": datetime.now().astimezone().isoformat(),
                 "platform": platform(True),
-                "idtrackerai_version": metadata.version("idtrackerai"),
+                "idtrackerai_version": idtrackerai_version(),
                 "python_version": python_version(),
                 "command": sys.argv,
             },
@@ -128,7 +130,7 @@ def check_version() -> tuple[ComparisonResult, str]:
         ">idtrackerai-(.+?)(.tar.gz|-py3-none-any.whl)<", no_yanked_versions
     )
 
-    current_version_str = metadata.version("idtrackerai")
+    current_version_str = idtrackerai_version()
     current_version = current_version_str.split("a")[0]
     try:
         current_version = tuple(map(int, current_version.split(".")))
@@ -169,7 +171,7 @@ def check_version() -> tuple[ComparisonResult, str]:
         elif "a" in current_version_str:
             return ComparisonResult.STABLE_RELEASE, (
                 "You are running an alpha version of idtracker.ai and the stable"
-                f" version is available: {metadata.version('idtrackerai')} ->"
+                f" version is available: {idtrackerai_version()} ->"
                 f" {latest_version_str}\nTo update, run: python -m pip install --upgrade"
                 " idtrackerai"
             )

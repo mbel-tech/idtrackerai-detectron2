@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from importlib import metadata
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -35,6 +36,29 @@ def deprecated(version: str = "", reason: str = "", **kwargs):
         return wrapper
 
     return decorator
+
+
+def idtrackerai_version() -> str:
+    """The installed version, whatever the distribution happens to be called.
+
+    This fork is distributed as "idtrackerai-detectron2" so it is not mistaken
+    for an upstream release, while still importing as "idtrackerai". A lookup
+    hardcoded to the import name therefore finds no metadata and raises. Ask
+    which distribution actually provides this package, and fall back to the
+    known names before giving up.
+    """
+    try:
+        candidates = list(metadata.packages_distributions().get("idtrackerai", []))
+    except Exception:  # noqa: BLE001 - metadata is best-effort
+        candidates = []
+    candidates += ["idtrackerai-detectron2", "idtrackerai"]
+
+    for name in candidates:
+        try:
+            return metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+    return "unknown"
 
 
 class IdtrackeraiError(Exception):

@@ -19,6 +19,7 @@ from idtrackerai.utils import (
 )
 
 from .arg_parser import parse_args
+from idtrackerai.utils import idtrackerai_version
 
 
 def gather_input_parameters() -> tuple[bool, dict[str, Any]]:
@@ -247,7 +248,7 @@ def general_test():
         logging.info(
             "[green]Test passed successfully in %s with version %s",
             str(datetime.now() - start).split(".")[0],
-            version("idtrackerai"),
+            idtrackerai_version(),
             extra={"markup": True},
         )
 

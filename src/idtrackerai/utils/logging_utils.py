@@ -20,6 +20,7 @@ from packaging.version import Version
 from rich.console import Console, ConsoleRenderable
 from rich.logging import RichHandler
 
+from .py_utils import idtrackerai_version  # noqa: F401
 from .py_utils import IdtrackeraiError, resolve_path
 from .telemetry import (
     check_version,
@@ -192,7 +193,7 @@ def init_logger(level: int = logging.DEBUG, write_to_disk: bool = False) -> None
     logging.getLogger("urllib3").setLevel(logging.INFO)
     logging.captureWarnings(True)
     logging.info(
-        f"[bold]Welcome to idtracker.ai[/] {metadata.version('idtrackerai')}",
+        f"[bold]Welcome to idtracker.ai[/] {idtrackerai_version()}",
         extra={"markup": True},
     )
     logging.debug(

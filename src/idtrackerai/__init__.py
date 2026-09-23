@@ -27,7 +27,7 @@ with suppress(ImportError):
         sys.modules.pop("PyQt6", None)
         from qtpy.QtWidgets import QApplication  # noqa F401
 
-from .utils import IdtrackeraiError, conf
+from .utils import IdtrackeraiError, conf, idtrackerai_version
 
 # Video has to be the first class to be imported
 from .session import Session
@@ -39,7 +39,7 @@ from .list_of_blobs import ListOfBlobs
 from .list_of_fragments import ListOfFragments
 from .list_of_global_fragments import ListOfGlobalFragments
 
-__version__ = metadata.version("idtrackerai")
+__version__ = idtrackerai_version()
 
 
 __all__ = [
