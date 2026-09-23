@@ -33,12 +33,20 @@ Statement of modifications (GPL-3.0 section 5a)
 
 Modified by Martina Bellio, from 2026-09-20.
 
-The purpose of the modification is to let animal outlines produced by an
-external instance-segmentation model (a fine-tuned Detectron2 Mask R-CNN)
-enter idtracker.ai directly, instead of being rendered back into a video
-for idtracker.ai to re-threshold. Identity tracking is deliberately left
-as it was: crossing detection, fragmentation, identification and gap
-closing are unmodified.
+The modifications have two purposes.
+
+The first is to let animal outlines produced by an external
+instance-segmentation model (a fine-tuned Detectron2 Mask R-CNN) enter
+idtracker.ai directly, instead of being rendered back into a video for
+idtracker.ai to re-threshold. Identity tracking is deliberately left as it
+was: crossing detection, fragmentation, identification and gap closing are
+unmodified.
+
+The second is to make the Validator, the tool for correcting trajectories
+by hand after tracking, usable on long recordings: an undo stack, a save
+that survives an unwritable session folder, an autosave, three further
+editing operations, and filters that keep the list of reported errors
+workable. These are described in VALIDATOR.md.
 
 Files changed relative to the fork point:
 
@@ -53,7 +61,11 @@ Files changed relative to the fork point:
 
   src/idtrackerai/session.py
       New external_contours parameter, resolved and checked in
-      prepare_tracking().
+      prepare_tracking(). New presence_intervals parameter recording, per
+      identity, the frames in which that animal is present; the Validator
+      stops reporting an identity as missing outside them. Fixed
+      prepare_tracking() raising NameError because idtrackerai_version()
+      was never imported.
 
   src/idtrackerai/segmentation_app/main.py
   src/idtrackerai/segmentation_app/widgets/__init__.py
@@ -77,6 +89,63 @@ Files changed relative to the fork point:
       distribution provides this package instead of assuming it is called
       "idtrackerai". Required by the rename below: without it the package
       raises PackageNotFoundError at import time once installed.
+
+  src/idtrackerai/extra_tools/validator/validation_GUI.py
+      Undo stack bound to Ctrl+Z; Swap, Extend and Merge editing
+      operations; a save that falls back to a local backup when the
+      session folder cannot be written, instead of failing silently on a
+      worker thread; a five-minute autosave; the presence-interval dialog;
+      the Video Info tab.
+
+  src/idtrackerai/extra_tools/validator/widgets/errors_explorer.py
+      Minimum-duration and identity-pair filters, a next-error button, and
+      masking of missing-identity errors outside an identity's declared
+      presence interval.
+
+  src/idtrackerai/extra_tools/validator/widgets/interpolator.py
+      PCHIP interpolation mode, which cannot overshoot between fixed
+      points; linear default; Enter applies; clicking a fixed point jumps
+      to its frame; undo integration.
+
+  src/idtrackerai/extra_tools/validator/widgets/length_calibrator.py
+  src/idtrackerai/extra_tools/validator/widgets/__init__.py
+      The calibration line now follows the cursor. Calibrations are deleted
+      by row rather than by matching their text, which removed the wrong
+      one when two read the same. The distance is entered numerically.
+
+  src/idtrackerai/utils/py_utils.py
+      LengthCalibration.from_dict() now fills the color slot, and
+      json_default() no longer uses asdict() on it. Being a slots
+      dataclass, a calibration restored from disk previously raised
+      AttributeError on both painting and the next save.
+
+  src/idtrackerai/blob.py
+      New swap_identity() and propagate_swap_identity(), which exchange two
+      identities along a fragment rather than renaming one.
+
+  src/idtrackerai/list_of_blobs.py
+      New merge_blobs(), which rebuilds one blob from the convex hull of
+      several, for an animal that segmentation split in two. save() takes a
+      verbose argument so the Validator's autosave writes nothing to the
+      terminal.
+
+  src/idtrackerai/GUI_tools/widgets_utils/canvas.py
+      New move_event signal and mouse tracking, for tools that draw a
+      preview following the cursor.
+
+  src/idtrackerai/GUI_tools/widgets_utils/custom_list.py
+      New removedItemIndex signal, which identifies a removed row when two
+      rows read the same. The existing removedItem signal is unchanged.
+
+  src/idtrackerai/GUI_tools/widgets_utils/id_labels.py
+      Context-menu entry for setting an identity's presence interval.
+
+  src/idtrackerai/GUI_tools/widgets_utils/video_player.py
+      Key auto-repeat is allowed through for the frame-step keys, so
+      holding one scrubs through the video instead of stepping once.
+
+  docs/source/user_guide/changelog.rst
+      A section for this fork's changes, above upstream's own entries.
 
   pyproject.toml
       Distribution renamed to idtrackerai-detectron2 to distinguish it
@@ -121,12 +190,15 @@ Files added:
   tests/external_contours_test.py
       Tests for the sidecar format and the segmentation path.
 
+  src/idtrackerai/extra_tools/validator/widgets/video_info.py
+      Read-only summary of the session being validated: frame rate,
+      resolution, frame and animal counts, and the video files.
+
   docs/detectron2-pipeline.md
       Documentation for the pipeline above.
 
-  docs/Automated behaviour tracking workflow.txt
-      Methods write-up for the earlier enhanced-video workflow this
-      replaces.
+  VALIDATOR.md
+      What this fork changes in the Validator, and why.
 
   NOTICE, CITATION.cff
       This file and citation metadata.
