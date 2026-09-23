@@ -818,6 +818,127 @@ class Blob:
 
         return first_frame_modified, last_frame_modified
 
+    def swap_identity(
+        self, identity_a: int, identity_b: int, close_to_centroid: tuple[float, float]
+    ) -> tuple[float, float]:
+        """[Validation] Exchanges two identities inside this blob.
+
+        Where :meth:`update_identity` renames one centroid, this exchanges two.
+        A crossing blob that the network resolved the wrong way round carries
+        both identities already, so renaming one of them would leave a
+        duplicate; both have to move at once.
+
+        `identity_a` is located with the usual centroid hint, because the user
+        clicked on it. `identity_b` has no hint, so it is found by identity
+        alone. When it is not present in this blob there is nothing to exchange
+        with and the call degrades to a plain rename, which is what makes the
+        method safe to run along a whole fragment where only some blobs carry
+        both identities.
+
+        Returns the centroid of `identity_a`, so that
+        :meth:`propagate_swap_identity` can follow the animal from frame to
+        frame the way :meth:`propagate_identity` does.
+
+        Raises
+        ------
+        ValueError
+            If `identity_a` is not present in this blob.
+
+        Notes
+        -----
+        This inherits an upstream quirk: :meth:`init_validator_variables` sizes
+        `user_generated_identities` from the *filtered* `final_identities`,
+        while :meth:`index_and_centroid_closer_to` returns an index into the
+        unfiltered `all_final_identities`. On a blob that already carries `-1`
+        removal markers the two disagree.
+        """
+        self.init_validator_variables()
+
+        # Raises ValueError if the clicked identity is not here; the caller
+        # (and the propagation loop) treats that as "nothing to do".
+        index_a, centroid_a, _ = self.index_and_centroid_closer_to(
+            close_to_centroid, identity_a
+        )
+
+        index_b = self._index_of_identity(identity_b)
+
+        self.user_generated_identities[index_a] = identity_b
+        if index_b is not None:
+            self.user_generated_identities[index_b] = identity_a
+
+        return centroid_a
+
+    def _index_of_identity(self, identity: int) -> int | None:
+        """Index of `identity` in this blob's final identities, or None.
+
+        Unlike :meth:`index_and_centroid_closer_to` this needs no centroid
+        hint, which is what the second half of a swap has to work with.
+        """
+        for index, final_identity in enumerate(self.all_final_identities):
+            if final_identity == identity:
+                return index
+        return None
+
+    def propagate_swap_identity(
+        self, identity_a: int, identity_b: int, centroid: tuple[float, float]
+    ) -> tuple[int, int]:
+        """[Validation] Propagates a swap to the next and previous blobs.
+
+        Returns the frame range where the swap took effect.
+
+        Unlike :meth:`propagate_identity`, which expects the caller to have
+        already updated `self`, this swaps `self` too. A swap is symmetric, so
+        doing it twice would undo it; keeping the whole operation in one call
+        removes any chance of the caller getting that wrong.
+
+        Parameters
+        ----------
+        identity_a : int
+            The identity the user clicked on.
+        identity_b : int
+            The identity to exchange it with.
+        centroid : tuple
+            Centroid hint locating `identity_a` in this blob.
+        """
+        blobs_stack: list[tuple[Blob, tuple[float, float]]]
+        first_frame_modified = self.frame_number
+        last_frame_modified = self.frame_number
+
+        try:
+            centroid = self.swap_identity(identity_a, identity_b, centroid)
+        except ValueError:  # centroid not found on self, nothing to propagate
+            return first_frame_modified, last_frame_modified
+
+        blobs_stack = [(next_blob, centroid) for next_blob in self.next]
+        while blobs_stack:
+            current, previous_centroid = blobs_stack.pop()
+            if current.fragment_identifier != self.fragment_identifier:
+                continue
+            try:
+                new_centroid = current.swap_identity(
+                    identity_a, identity_b, previous_centroid
+                )
+            except ValueError:  # centroid not found on "current"
+                continue
+            blobs_stack += [(next_blob, new_centroid) for next_blob in current.next]
+            last_frame_modified = current.frame_number
+
+        blobs_stack += [(prev_blob, centroid) for prev_blob in self.previous]
+        while blobs_stack:
+            current, previous_centroid = blobs_stack.pop()
+            if current.fragment_identifier != self.fragment_identifier:
+                continue
+            try:
+                new_centroid = current.swap_identity(
+                    identity_a, identity_b, previous_centroid
+                )
+            except ValueError:  # centroid not found on "current"
+                continue
+            blobs_stack += [(prev_blob, new_centroid) for prev_blob in current.previous]
+            first_frame_modified = current.frame_number
+
+        return first_frame_modified, last_frame_modified
+
     @property
     def summary(self) -> Sequence[str]:
         return (
