@@ -5,6 +5,8 @@ from .frame_analyzer import FrameAnalyzer
 from .intensity_ths import IntensityThresholds
 from .open_video_widget import OpenVideoWidget
 from .ROI_widget import ROIWidget
+from .enhancement_preview import EnhancementPreview
+from .enhancement_widget import EnhancementWidget
 from .segmentation_source import SegmentationSourceWidget
 from .track_intervals_widget import TrackingIntervalsWidget
 
@@ -16,6 +18,8 @@ __all__ = [
     "OpenVideoWidget",
     "ROIWidget",
     "SegmentationSourceWidget",
+    "EnhancementWidget",
+    "EnhancementPreview",
     "TrackingIntervalsWidget",
     "AreaThresholds",
 ]

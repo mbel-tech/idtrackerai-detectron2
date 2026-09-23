@@ -22,6 +22,7 @@ from idtrackerai.GUI_tools import WrappedLabel
 
 THRESHOLDING = "Thresholding"
 EXTERNAL = "External contours"
+DETECTRON2 = "Detectron2 pipeline"
 
 
 class SegmentationSourceWidget(QWidget):
@@ -33,6 +34,7 @@ class SegmentationSourceWidget(QWidget):
     """
 
     valueChanged = Signal(object)  # Path | None
+    modeChanged = Signal(str)      # one of the three constants above
 
     def __init__(self):
         super().__init__()
@@ -44,7 +46,7 @@ class SegmentationSourceWidget(QWidget):
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.source = QComboBox()
-        self.source.addItems((THRESHOLDING, EXTERNAL))
+        self.source.addItems((THRESHOLDING, EXTERNAL, DETECTRON2))
         self.source.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.source.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum
@@ -85,6 +87,14 @@ class SegmentationSourceWidget(QWidget):
         external = text == EXTERNAL
         self.file_label.setVisible(external and self.path is not None)
         self.browse.setVisible(external)
+        self.modeChanged.emit(text)
+
+        if text == DETECTRON2:
+            # Preparing a model, not tracking with one. There is no contour
+            # file yet, so this must not open a file dialog the way EXTERNAL
+            # does; the panel below takes over.
+            self.valueChanged.emit(None)
+            return
 
         if not external:
             self.valueChanged.emit(None)
@@ -196,9 +206,17 @@ class SegmentationSourceWidget(QWidget):
         self.valueChanged.emit(self.path)
 
     def value(self) -> Path | None:
+        """The contour file tracking will use, or None.
+
+        Detectron2 mode deliberately returns None: it is a preparation mode,
+        and nothing about it belongs in the saved parameters.
+        """
         if self.source.currentText() == EXTERNAL:
             return self.path
         return None
+
+    def mode(self) -> str:
+        return self.source.currentText()
 
     def uses_external_contours(self) -> bool:
         return self.value() is not None

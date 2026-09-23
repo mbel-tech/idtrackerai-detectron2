@@ -31,6 +31,8 @@ from .widgets import (
     AreaThresholds,
     BkgWidget,
     BlobInfoWidget,
+    EnhancementPreview,
+    EnhancementWidget,
     FrameAnalyzer,
     IntensityThresholds,
     OpenVideoWidget,
@@ -38,6 +40,7 @@ from .widgets import (
     SegmentationSourceWidget,
     TrackingIntervalsWidget,
 )
+from .widgets.segmentation_source import DETECTRON2, EXTERNAL
 
 
 class SegmentationGUI(GUIBase):
@@ -71,6 +74,9 @@ class SegmentationGUI(GUIBase):
         self.widgets_to_close.append(self.videoPlayer)
 
         self.segmentation_source = SegmentationSourceWidget()
+        self.enhancement = EnhancementWidget()
+        self.enhancement_preview = EnhancementPreview()
+        self.enhancement.setVisible(False)
         self.intensity_thresholds = IntensityThresholds(self, min=0, max=255)
         self.area_thresholds = AreaThresholds()
 
@@ -137,6 +143,17 @@ class SegmentationGUI(GUIBase):
         self.bkg_widget.new_bkg_data.connect(self.intensity_thresholds.bkg_changed)
         self.frame_analyzer.new_areas.connect(self.blobInfo.setAreas)
         self.frame_analyzer.new_parameters.connect(self.videoPlayer.update)
+        self.segmentation_source.modeChanged.connect(self.segmentation_mode_changed)
+        self.enhancement.settingsChanged.connect(self.enhancement_preview.set_settings)
+        self.enhancement.settingsChanged.connect(lambda _s: self.videoPlayer.update())
+        self.enhancement.splitChanged.connect(self.enhancement_preview.set_split)
+        self.enhancement.splitChanged.connect(lambda _v: self.videoPlayer.update())
+        self.enhancement_preview.failed.connect(self.enhancement.show_error)
+        # connected before the two below, so the enhanced frame is painted
+        # under the blob polygons and the ROI outlines rather than over them
+        self.videoPlayer.painting_time.connect(
+            self.enhancement_preview.paint_on_canvas
+        )
         self.videoPlayer.painting_time.connect(self.frame_analyzer.paint_on_canvas)
         self.videoPlayer.painting_time.connect(self.ROI_Widget.paint_on_canvas)
         self.videoPlayer.canvas.click_event.connect(self.ROI_Widget.click_event)
@@ -152,6 +169,7 @@ class SegmentationGUI(GUIBase):
         self.ROI_Widget.exclusive_rois.setToolTip(tooltips["exclusive_rois"])
         self.segmentation_source.setToolTip(tooltips["segmentation_source"])
         self.segmentation_source.browse.setToolTip(tooltips["external_contours"])
+        self.enhancement.setToolTip(tooltips["detectron2_enhancement"])
         self.bkg_widget.setToolTip(tooltips["background_subtraction"])
         self.bkg_widget.bkg_stat.setToolTip(tooltips["background_stat"])
         self.bkg_widget.view_bkg.setToolTip(tooltips["background_view"])
@@ -180,6 +198,7 @@ class SegmentationGUI(GUIBase):
             QHLine(),
             n_animals_row,
             self.segmentation_source,
+            self.enhancement,
             self.bkg_widget,
             self.intensity_thresholds,
             self.area_thresholds,
@@ -232,16 +251,36 @@ class SegmentationGUI(GUIBase):
         QTimer.singleShot(0, self.load_parameters)
 
     def segmentation_source_changed(self, path: Path | None) -> None:
-        """Switches the preview, and greys out what the chosen source ignores.
+        """Keeps the preview in step with the chosen contour file."""
+        self.frame_analyzer.set_external_contours(path)
+        self.videoPlayer.update()
+
+    def segmentation_mode_changed(self, mode: str) -> None:
+        """Shows only what the chosen mode actually uses.
 
         With external contours neither the intensity thresholds nor the
-        background model take part in segmentation, so leaving them live would
-        suggest they still do something.
+        background model take part in segmentation, so they are greyed out:
+        leaving them live would suggest they still do something.
+
+        Detectron2 mode goes further and hides them, because the panel needs
+        the vertical space and because nothing in that mode segments by
+        threshold at all.
         """
-        external = path is not None
-        self.frame_analyzer.set_external_contours(path)
-        self.intensity_thresholds.setEnabled(not external)
-        self.bkg_widget.setEnabled(not external)
+        external = mode == EXTERNAL
+        detectron2 = mode == DETECTRON2
+
+        self.enhancement.setVisible(detectron2)
+        self.enhancement_preview.set_enabled(detectron2)
+        self.frame_analyzer.set_suspended(detectron2)
+
+        for widget in (self.intensity_thresholds, self.bkg_widget):
+            widget.setVisible(not detectron2)
+            widget.setEnabled(not external and not detectron2)
+        for widget in (self.area_thresholds, self.blobInfo):
+            widget.setVisible(not detectron2)
+
+        if detectron2:
+            self.enhancement_preview.set_settings(self.enhancement.settings())
         self.videoPlayer.update()
 
     def manageDropedPaths(self, paths: Sequence[str]) -> None:
@@ -424,7 +463,7 @@ class SegmentationGUI(GUIBase):
             self.videoPlayer.setEnabled(True)
             # enabling every widget above would also re-enable the threshold
             # controls, which must stay off while external contours are in use
-            self.segmentation_source_changed(self.segmentation_source.value())
+            self.segmentation_mode_changed(self.segmentation_source.mode())
 
         self.setWindowTitle(
             f"Segmentation App | {Path(video_paths[0]).name}"

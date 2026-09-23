@@ -78,6 +78,11 @@ class EnhancementPreview(QObject):
     def paint_on_canvas(self, painter, frame_number: int, frame) -> None:
         if not self.enabled or frame is None:
             return
+        # Before a video is loaded the player emits a zero-size array rather
+        # than None, and OpenCV asserts on it rather than returning an empty
+        # result. There is nothing to preview either way.
+        if getattr(frame, "size", 0) == 0 or min(frame.shape[:2]) == 0:
+            return
         if not self.settings.get("enhance", True) or self.split <= 0.0:
             return  # the player's raw frame is already what we want to show
 

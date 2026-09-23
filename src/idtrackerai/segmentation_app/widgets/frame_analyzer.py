@@ -40,6 +40,17 @@ class FrameAnalyzer(QWidget):
         self.need_to_redraw = True
         self.new_parameters.emit()
 
+    def set_suspended(self, suspended: bool):
+        """Stop segmenting and drawing entirely.
+
+        In Detectron2 preparation mode there is no contour file and
+        thresholding means nothing, so the blob polygons would be noise
+        painted over the enhancement preview.
+        """
+        self.suspended = suspended
+        self.need_to_redraw = True
+        self.new_parameters.emit()
+
     def set_area_ths(self, area_ths: Sequence[float]):
         self.area_ths = area_ths
         self.need_to_redraw = True
@@ -52,6 +63,7 @@ class FrameAnalyzer(QWidget):
         self.bkg_model = None
         self.ROI_mask = None
         self.external_contours: Path | str | None = None
+        self.suspended = False
         self.intensity_ths = [0, 1]
         self.area_ths = [1, 1]
         self.blob_polygons: list[list[QPoint]] = []
@@ -82,6 +94,14 @@ class FrameAnalyzer(QWidget):
     def paint_on_canvas(
         self, painter: CanvasPainter, frame_number: int, frame: np.ndarray | None
     ):
+        if self.suspended:
+            if self.drawn_frame != frame_number or self.need_to_redraw:
+                self.areas = []
+                self.new_areas.emit(frame_number, self.areas)
+                self.need_to_redraw = False
+                self.drawn_frame = frame_number
+            return
+
         if self.drawn_frame != frame_number or self.need_to_redraw:
             self.process_frame(frame, frame_number)
             self.new_areas.emit(frame_number, self.areas)
