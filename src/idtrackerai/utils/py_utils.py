@@ -43,17 +43,16 @@ def idtrackerai_version() -> str:
 
     This fork is distributed as "idtrackerai-detectron2" so it is not mistaken
     for an upstream release, while still importing as "idtrackerai". A lookup
-    hardcoded to the import name therefore finds no metadata and raises. Ask
-    which distribution actually provides this package, and fall back to the
-    known names before giving up.
-    """
-    try:
-        candidates = list(metadata.packages_distributions().get("idtrackerai", []))
-    except Exception:  # noqa: BLE001 - metadata is best-effort
-        candidates = []
-    candidates += ["idtrackerai-detectron2", "idtrackerai"]
+    hardcoded to the import name therefore finds no metadata and raises, so the
+    known names are tried in turn.
 
-    for name in candidates:
+    Deliberately does NOT use importlib.metadata.packages_distributions() to
+    discover the name generically. That enumerates every installed distribution
+    and stats every file in each; on a system Python with a large site-packages
+    it takes tens of seconds, and this runs at import time, so the application
+    appeared to hang on startup.
+    """
+    for name in ("idtrackerai-detectron2", "idtrackerai"):
         try:
             return metadata.version(name)
         except metadata.PackageNotFoundError:
