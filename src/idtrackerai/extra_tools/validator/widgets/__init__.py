@@ -6,6 +6,7 @@ from .length_calibrator import LengthCalibrator
 from .mark_metadata import MarkMetadata
 from .paint_blobs import find_selected_blob, paintBlobs, paintTrails
 from .setup_points import SetupPoints
+from .video_info import VideoInfo
 
 __all__ = [
     "MarkMetadata",
@@ -18,4 +19,5 @@ __all__ = [
     "Interpolator",
     "AdditionalInfo",
     "LengthCalibrator",
+    "VideoInfo",
 ]
