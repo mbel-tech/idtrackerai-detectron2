@@ -26,6 +26,8 @@ from qtpy.QtGui import QDesktopServices
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -39,6 +41,8 @@ from qtpy.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QToolBox,
     QVBoxLayout,
     QWidget,
@@ -261,6 +265,8 @@ class Detectron2Panel(QWidget):
         self.group_by.addItem("Random (not recommended)", "random")
         self.group_by.currentIndexChanged.connect(self._group_by_changed)
         self.grouping_status = WrappedLabel(framed=True)
+        self.edit_grouping_button = QPushButton("Edit grouping...")
+        self.edit_grouping_button.clicked.connect(self.edit_grouping)
 
         self.build_button = QPushButton("Build dataset")
         self.build_button.clicked.connect(self.run_dataset)
@@ -272,7 +278,13 @@ class Detectron2Panel(QWidget):
         form = QFormLayout()
         form.addRow("Animals per frame", self.expected_instances)
         form.addRow("Validation fraction", self.val_fraction)
-        form.addRow("Train/validation split", self.group_by)
+        group_row = QHBoxLayout()
+        group_row.setContentsMargins(0, 0, 0, 0)
+        group_row.addWidget(self.group_by, 1)
+        group_row.addWidget(self.edit_grouping_button)
+        group_holder = QWidget()
+        group_holder.setLayout(group_row)
+        form.addRow("Train/validation split", group_holder)
         row = QHBoxLayout()
         row.addWidget(self.dataset_dir)
         row.addWidget(browse)
@@ -290,6 +302,78 @@ class Detectron2Panel(QWidget):
     def _group_by_changed(self) -> None:
         if self.state is not None:
             self.state.group_by = self.group_by.currentData()
+            self.state.save()
+        self._update_grouping_status()
+        self._update_video_summary()
+
+    def edit_grouping(self) -> None:
+        """Correct the guessed grouping, clip by clip.
+
+        The rule reads file names, so it can only ever guess. Two clips that
+        happen to be named like segments of one recording, or segments named
+        so that nothing marks them as such, both end up wrong, and nothing in
+        the name can settle it. This is where the person who ran the
+        experiment says which is which.
+        """
+        videos = self.video_paths
+        if not videos:
+            QMessageBox.information(
+                self, "No videos", "Add the videos this corpus draws from first."
+            )
+            return
+
+        overrides = dict(self.state.group_overrides) if self.state else {}
+        mode = self.group_by.currentData()
+        mode = "file" if mode == "random" else mode
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Grouping for the train/validation split")
+        explain = WrappedLabel()
+        explain.setText(
+            "Clips sharing a group never end up on opposite sides of the "
+            "split. Edit the group of any clip that was guessed wrongly; "
+            "clearing a cell restores the guess."
+        )
+        table = QTableWidget(len(videos), 2)
+        table.setHorizontalHeaderLabels(["Clip", "Group"])
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setStretchLastSection(True)
+        for row, video in enumerate(videos):
+            stem = video.stem
+            name = QTableWidgetItem(stem)
+            name.setFlags(name.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 0, name)
+            table.setItem(
+                row, 1,
+                QTableWidgetItem(dataset_mod.group_of(stem, overrides, mode)),
+            )
+        table.resizeColumnsToContents()
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(explain)
+        layout.addWidget(table)
+        layout.addWidget(buttons)
+        dialog.resize(520, 420)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        # Only what differs from the guess is stored, so improving the rule
+        # later still benefits anyone who did not have to correct it.
+        new_overrides: dict[str, str] = {}
+        for row, video in enumerate(videos):
+            stem = video.stem
+            chosen = (table.item(row, 1).text() or "").strip()
+            if chosen and chosen != dataset_mod.group_of(stem, None, mode):
+                new_overrides[stem] = chosen
+        if self.state is not None:
+            self.state.group_overrides = new_overrides
             self.state.save()
         self._update_grouping_status()
         self._update_video_summary()
@@ -895,6 +979,7 @@ class Detectron2Panel(QWidget):
             (self.expected_instances, "d2_expected"),
             (self.val_fraction, "d2_val_fraction"),
             (self.group_by, "d2_group_by"),
+            (self.edit_grouping_button, "d2_edit_grouping"),
             (self.grouping_status, "d2_group_by"),
             (self.dataset_dir, "d2_dataset_folder"),
             (self.build_button, "d2_build"),
