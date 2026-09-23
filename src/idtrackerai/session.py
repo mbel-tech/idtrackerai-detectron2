@@ -24,6 +24,7 @@ from .utils import (
     create_dir,
     extract_filename,
     get_params_from_model_path,
+    idtrackerai_version,
     json_default,
     json_object_hook,
     remove_dir,
@@ -131,6 +132,18 @@ class Session:
     "Silhouette score reached at the end of the contrastive step"
     fragment_connectivity: float | None = None
     "Connectivity of the fragments used in the contrastive step"
+    presence_intervals: dict[str, list[list[int]]] = {}
+    """Frame intervals in which each identity is expected to be present, set in
+    the Validator and keyed by the identity number as a string (JSON has no
+    integer keys). An identity with no entry is assumed present throughout.
+
+    Animals that enter or leave the arena mid-video are absent for real, not
+    missing by mistake, and without this the Validator reports every one of
+    those frames as a "Miss id" error.
+
+    Rebind this, never mutate it in place: ``Session`` is a plain class, so the
+    empty default above is shared by every instance in the process.
+    """
 
     def set_parameters(self, reset: bool = False, **parameters) -> set[str]:
         """Sets parameters to self only if they are present in the class annotations.
