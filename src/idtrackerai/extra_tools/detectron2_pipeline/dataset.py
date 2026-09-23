@@ -43,6 +43,15 @@ class DatasetRequest:
     val_fraction: float = 0.15
     split_by: str = "video"
     seed: int = 0
+    group_by: str = "recording"
+    """How clips are grouped when ``split_by="video"``.
+
+    ``"recording"`` folds the pieces of one recording together (the segments of
+    a trial), ``"file"`` treats every clip separately, which is what this did
+    before grouping existed.
+    """
+    group_overrides: dict[str, str] | None = None
+    """Corrections to the inferred grouping, as ``{clip stem: group}``."""
     labels: Sequence[str] | None = None
     single_class: str | None = None
     expected_instances: int | None = None
@@ -115,17 +124,97 @@ def count_annotated(folder: Path) -> int:
     return sum(1 for p in folder.glob("*.json") if is_labelme(p))
 
 
+# Suffixes stripped from a recorded source so that a manifest written before
+# the spelling was settled still names the same clip as the filename fallback.
+VIDEO_SUFFIXES = (".mp4", ".avi", ".mov", ".mkv", ".mpg", ".mpeg", ".wmv", ".m4v")
+
+# Trailing name parts that mark a piece of a recording rather than a recording.
+SEGMENT_WORDS = ("segment", "seg", "part", "clip", "chunk", "piece", "vid", "video")
+
+# Trailing name parts left behind by re-encoding or tidying a file, which do
+# not make it a different recording.
+REENCODE_WORDS = frozenset(
+    ("cleaned", "clean", "fixed", "trimmed", "trim", "raw",
+     "edited", "edit", "copy", "final", "new", "old")
+)
+
+
+def normalise_source(source: str) -> str:
+    """One spelling for a clip, whatever spelling was recorded."""
+    name = source.strip()
+    lowered = name.lower()
+    for suffix in VIDEO_SUFFIXES:
+        if lowered.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 def source_video_of(file_name: str, manifest: dict | None) -> str:
     """Which clip a frame came from, for the group-aware split."""
     if manifest:
         entry = manifest.get(file_name)
         if entry:
-            return entry["source_video"]
+            return normalise_source(entry["source_video"])
     # fall back to the naming the sampling step uses: <video stem>_f<number>.png
     stem = Path(file_name).stem
     if "_f" in stem:
-        return stem.rsplit("_f", 1)[0]
-    return stem
+        return normalise_source(stem.rsplit("_f", 1)[0])
+    return normalise_source(stem)
+
+
+def group_key(stem: str) -> str:
+    """The recording a clip belongs to: B3_N1_segment_3 -> B3_N1.
+
+    Recordings are routinely saved in pieces, and the pieces show the same
+    animals in the same arena minutes apart. Splitting train from validation
+    between two pieces of one recording is the same near-duplicate leak that
+    splitting within a single clip would be, so the pieces are folded together.
+
+    This is a guess made from a file name, and it can be wrong -- clips
+    genuinely named trial_1 and trial_2 would be merged. The caller is expected
+    to show what was inferred and let it be corrected, rather than apply it
+    silently.
+    """
+    name = normalise_source(stem)
+    kept = name.split("_")
+    while len(kept) > 1:
+        token = kept[-1].lower()
+        bare = token.rstrip("0123456789")
+        if (
+            token.isdigit()
+            or token in REENCODE_WORDS
+            or token in SEGMENT_WORDS
+            or (bare in SEGMENT_WORDS and bare != token)
+        ):
+            kept.pop()
+        else:
+            break
+
+    # "clip_00" and "clip_01" are two recordings, not two pieces of one called
+    # "clip". If nothing survives but the word marking a piece, the name never
+    # carried a recording name, so there is nothing to group by: leave it.
+    if all(t.lower().rstrip("0123456789") in SEGMENT_WORDS for t in kept):
+        return name
+    return "_".join(kept)
+
+
+def group_of(source: str, overrides: dict[str, str] | None, group_by: str) -> str:
+    """The split group for a clip, honouring any correction the user made."""
+    source = normalise_source(source)
+    if overrides and source in overrides:
+        return overrides[source]
+    if group_by == "recording":
+        return group_key(source)
+    return source
+
+
+def group_videos(sources: Sequence[str], overrides: dict[str, str] | None = None,
+                 group_by: str = "recording") -> dict[str, list[str]]:
+    """The inferred grouping, for showing before anything is built."""
+    groups: dict[str, list[str]] = defaultdict(list)
+    for source in sorted({normalise_source(s) for s in sources}):
+        groups[group_of(source, overrides, group_by)].append(source)
+    return dict(groups)
 
 
 def read_enhancement(input_dir: Path) -> dict | None:
@@ -265,6 +354,11 @@ def build_coco_dataset(
                 "height": int(height),
                 "shapes": shapes,
                 "source_video": source_video_of(Path(image_name).name, manifest),
+                "group": group_of(
+                    source_video_of(Path(image_name).name, manifest),
+                    request.group_overrides,
+                    request.group_by,
+                ),
             }
         )
 
@@ -320,10 +414,10 @@ def build_coco_dataset(
 
     report.train_images = len(train["images"])
     report.train_annotations = len(train["annotations"])
-    report.train_videos = sorted({i["source_video"] for i in train_images})
+    report.train_videos = sorted({i["group"] for i in train_images})
     report.val_images = len(val["images"])
     report.val_annotations = len(val["annotations"])
-    report.val_videos = sorted({i["source_video"] for i in val_images})
+    report.val_videos = sorted({i["group"] for i in val_images})
 
     (request.output_dir / "report.json").write_text(
         json.dumps(report.as_dict(), indent=2), encoding="utf-8"
@@ -361,10 +455,40 @@ def _split(per_image, request: DatasetRequest, report: DatasetReport):
 
     by_video: dict[str, list[dict]] = defaultdict(list)
     for image in per_image:
-        by_video[image["source_video"]].append(image)
+        by_video[image["group"]].append(image)
+
+    # Grouping is inferred from file names, and names do not always say whether
+    # "trial_1" and "trial_2" are one recording in two pieces or two
+    # recordings. When the guess collapses everything into a single group there
+    # is nothing left to split on, and per-clip grouping -- weaker, but real --
+    # beats falling back to a random split.
+    sources = {image["source_video"] for image in per_image}
+    if len(by_video) < 2 <= len(sources):
+        report.notes.append(
+            f"Grouping by recording put all {len(sources)} clips in one group"
+            f" ({sorted(by_video)[0]}), which leaves nothing to split on, so"
+            " the split is by clip instead. If these clips really are pieces of"
+            " one recording, the validation score will be optimistic."
+        )
+        by_video = defaultdict(list)
+        for image in per_image:
+            # rewrite the group itself, so the report names what was actually
+            # split on rather than the grouping that was abandoned
+            image["group"] = image["source_video"]
+            by_video[image["source_video"]].append(image)
 
     videos = sorted(by_video)
     rng.shuffle(videos)
+
+    singletons = sum(1 for v in videos if len(by_video[v]) == 1)
+    if singletons == len(videos) and len(videos) > 2:
+        report.notes.append(
+            f"Every one of the {len(videos)} frames was attributed to a"
+            " different source, so grouping them achieves nothing and this is"
+            " in effect a random split. That usually means the frames were not"
+            " named by the sampling step, so their source could not be read."
+        )
+
     if len(videos) < 2:
         report.notes.append(
             f"All frames come from one source ({videos[0]}), so a by-video split"
@@ -374,17 +498,31 @@ def _split(per_image, request: DatasetRequest, report: DatasetReport):
         )
         return _random_split(per_image, request.val_fraction, rng)
 
+    # Whole groups go to one side or the other, so the validation set can only
+    # land on group boundaries. Take a group only while doing so gets closer to
+    # the target than stopping would: adding it regardless, which is what this
+    # did before, overshot a requested 15% to 26% on sixteen uneven recordings.
     target = len(per_image) * request.val_fraction
     val_images: list[dict] = []
     train_images: list[dict] = []
     taken = 0
     for video in videos:
         group = by_video[video]
-        if taken < target and len(val_images) + len(group) <= len(per_image) - 1:
+        fits = len(val_images) + len(group) <= len(per_image) - 1
+        closer = abs(taken + len(group) - target) < abs(taken - target)
+        if fits and (taken == 0 or closer):
             val_images += group
             taken += len(group)
         else:
             train_images += group
+
+    achieved = len(val_images) / len(per_image) if per_image else 0.0
+    if abs(achieved - request.val_fraction) > 0.05:
+        report.notes.append(
+            f"Validation is {achieved:.0%} of the frames rather than the"
+            f" {request.val_fraction:.0%} requested. Whole recordings go to one"
+            " side, so the split can only land on a recording boundary."
+        )
     return train_images, val_images
 
 
