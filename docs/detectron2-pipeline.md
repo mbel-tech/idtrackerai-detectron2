@@ -177,7 +177,7 @@ Upload to `MyDrive/idtrackerai_detectron2/`:
 
 ```
 colab_bundle.zip
-dataset/        from the GUI's step 4, or labelme_to_coco.py
+dataset/        from the GUI's step 4, or idtrackerai_d2_dataset
 ```
 
 **The videos must be on Drive too.** Inference decodes every frame, so the clips

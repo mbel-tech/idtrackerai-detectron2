@@ -24,7 +24,7 @@ The built-in defaults reproduce the pipeline this fork replaced. They are a
 starting point for one particular setup, not a recommendation. Tune them
 against your own footage:
 
-    python tools/frame_preprocessing.py --video clip.mp4 --frame 500 \\
+    idtrackerai_d2_enhance --video clip.mp4 --frame 500 \\
         --output check.png --save-profile setups/tank_a.json
 
 Detectron2's R-50-FPN configs expect 3-channel BGR input, so the enhanced

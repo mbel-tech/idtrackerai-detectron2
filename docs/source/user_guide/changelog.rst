@@ -81,6 +81,12 @@ Segmentation changes
   across them, and a single unreadable file aborting a whole sampling run.
   Clips whose file names would collide are now refused before anything is
   written.
+- Fixed the Colab notebook aborting on every freshly built bundle: its
+  integrity check looked for ``tools/frame_preprocessing.py``, a name the
+  bundle has never written. Repaired its markdown cells, whose stored lines
+  had lost their line endings so each cell rendered as one run-on paragraph,
+  and updated the script names the fork has since replaced with installed
+  ``idtrackerai_d2_*`` commands.
 - New ``enhancement`` session parameter. Frame enhancement (CLAHE and
   correction for uneven lighting) is chosen against the footage in the
   Segmentation App, with a live preview and named presets, and applies in

@@ -1,4 +1,4 @@
-"""Fine-tunes a Mask R-CNN on the COCO dataset produced by labelme_to_coco.py.
+"""Fine-tunes a Mask R-CNN on the COCO dataset produced by the dataset step.
 
 Reads the number of classes from the annotations rather than taking it as a
 flag: a NUM_CLASSES that disagrees with the data is one of the easiest ways to
@@ -49,7 +49,10 @@ def main():
         description="Fine-tune Mask R-CNN for instance segmentation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--dataset", type=Path, required=True, help="output of labelme_to_coco.py")
+    parser.add_argument(
+        "--dataset", type=Path, required=True,
+        help="the dataset folder built by the Segmentation App or idtrackerai_d2_dataset",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--config",
@@ -100,7 +103,11 @@ def main():
     images_dir = args.dataset / "images"
     for path in (train_json, val_json, images_dir):
         if not path.exists():
-            raise SystemExit(f"Missing {path}. Run labelme_to_coco.py first.")
+            raise SystemExit(
+                f"Missing {path}. Build the dataset first, in the "
+                "Segmentation App or with idtrackerai_d2_dataset, and "
+                "upload the whole folder."
+            )
 
     class_names = read_categories(train_json)
     n_train = count_images(train_json)
