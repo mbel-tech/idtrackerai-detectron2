@@ -39,6 +39,12 @@ from typing import Any
 import cv2
 import numpy as np
 
+try:
+    from .errors import PreprocessingError
+except ImportError:  # loaded by path, e.g. from a Colab bundle with no package
+    class PreprocessingError(Exception):  # type: ignore[no-redef]
+        """A profile could not be read or made sense of."""
+
 # Starting point, not a recommendation. Override per setup with a profile.
 CLAHE_CLIP_LIMIT = 1.5
 CLAHE_TILE_GRID = 8
@@ -136,17 +142,17 @@ def load_profile(path: Path | str) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise SystemExit(f"Preprocessing profile not found: {path}")
+        raise PreprocessingError(f"Preprocessing profile not found: {path}")
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"Preprocessing profile {path} is not valid JSON: {exc}")
+        raise PreprocessingError(f"Preprocessing profile {path} is not valid JSON: {exc}")
 
     if not isinstance(data, dict):
-        raise SystemExit(f"Preprocessing profile {path} must contain a JSON object")
+        raise PreprocessingError(f"Preprocessing profile {path} must contain a JSON object")
 
     settings = data.get("enhancement", data)
     unknown = set(settings) - set(SETTING_KEYS) - {"name", "notes"}
     if unknown:
-        raise SystemExit(
+        raise PreprocessingError(
             f"Preprocessing profile {path} has unknown key(s): {sorted(unknown)}.\n"
             f"Valid keys: {list(SETTING_KEYS)}"
         )
@@ -369,7 +375,7 @@ def _demo():
     ok, frame = cap.read()
     cap.release()
     if not ok:
-        raise SystemExit(f"Could not read frame {args.frame} of {args.video}")
+        raise PreprocessingError(f"Could not read frame {args.frame} of {args.video}")
 
     gray = to_gray(frame)
     if settings["enhance"]:
