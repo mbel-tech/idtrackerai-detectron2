@@ -16,6 +16,8 @@ from idtrackerai.utils import LengthCalibration
 class LengthCalibrator(QWidget):
     needToDraw = Signal()
     current_calibration: LengthCalibration | None = None
+    preview_point: tuple[float, float] | None = None
+    """Where the cursor is while the second calibration point is being placed."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -32,7 +34,7 @@ class LengthCalibrator(QWidget):
         self.add.clicked.connect(self.add_clicked)
         self.calibrations: list[LengthCalibration] = []
         self.list.ListChanged.connect(self.needToDraw.emit)
-        self.list.removedItem.connect(self.remove_item)
+        self.list.removedItemIndex.connect(self.remove_item)
         self.color_count = -1
         self.popup = LightPopUp()
         self.info_dialog_already_displayed: bool = False
@@ -50,27 +52,49 @@ class LengthCalibrator(QWidget):
             if self.current_calibration.has_two_points():
                 self.end_calibration()
 
+    def move_event(self, event: CanvasMouseEvent) -> None:
+        """Draws the calibration line as the cursor moves.
+
+        Placing two points blind and only then seeing the line means redoing the
+        calibration whenever it lands off the mark. Following the cursor makes
+        the second click a confirmation rather than a guess.
+        """
+        if (
+            not self.isVisible()
+            or not self.isEnabled()
+            or self.current_calibration is None
+            or self.current_calibration.point_A is None
+        ):
+            return
+
+        self.preview_point = event.xy_data
+        self.needToDraw.emit()
+
     def end_calibration(self) -> None:
         if self.current_calibration is None:
             return
 
-        valid = False
-        dialog_text = "Enter real distance between the two points:"
-        while not valid:
-            value_str, ok = QInputDialog.getText(self.add, "idtracker.ai", dialog_text)
-            if not ok:
-                self.current_calibration = None
-                return
-            try:
-                value = float(value_str)
-            except ValueError:
-                valid = False
-            else:
-                valid = True
-            if not valid:
-                dialog_text = "Invalid characters encountered"
+        self.preview_point = None
+        self.needToDraw.emit()
 
-        self.current_calibration.distance = value
+        # A positive minimum: the distance is a denominator in
+        # LengthCalibration.value(), so zero would be a division by zero later.
+        # Positional arguments: PyQt6 names the bounds min/max and PySide6 names
+        # them minValue/maxValue, and qtpy does not paper over the difference.
+        distance, ok = QInputDialog.getDouble(
+            self,
+            "idtracker.ai",
+            "Enter real distance between the two points:",
+            1.0,  # value
+            1e-9,  # minimum; the distance is a denominator in value()
+            2147483647.0,  # maximum, Qt's own default
+            4,  # decimals
+        )
+        if not ok:
+            self.current_calibration = None
+            return
+
+        self.current_calibration.distance = distance
         self.calibrations.append(self.current_calibration)
         self.list.add_str(
             str(self.current_calibration), color=QColor(self.current_calibration.color)
@@ -93,14 +117,22 @@ class LengthCalibrator(QWidget):
         self.current_calibration = LengthCalibration(point_colors[self.color_count])
         self.needToDraw.emit()
 
-    def remove_item(self, data: str) -> None:
-        for calibration in self.calibrations:
-            if str(calibration) == data:
-                self.calibrations.remove(calibration)
-                return
+    def remove_item(self, item_index: int) -> None:
+        """Removes the calibration shown on row `item_index`.
+
+        Matching on `str(calibration)` instead, as this used to, deletes the
+        first calibration with the same points and distance rather than the one
+        whose row was clicked.
+        """
+        if 0 <= item_index < len(self.calibrations):
+            self.calibrations.pop(item_index)
+            self.needToDraw.emit()
 
     def load(self, calibrations: list[LengthCalibration] | None) -> None:
         self.list.clear()
+        # The widget list and self.calibrations are indexed together now, so
+        # they have to be cleared together.
+        self.calibrations = []
         if calibrations is None:
             return
 
@@ -142,6 +174,12 @@ class LengthCalibrator(QWidget):
 
         if calibration.point_A is not None:
             painter.drawBigPoint(*calibration.point_A)
+
+            if self.preview_point is not None:
+                painter.setPen(QColor(calibration.color))
+                painter.drawLine(
+                    QPointF(*calibration.point_A), QPointF(*self.preview_point)
+                )
 
         if calibration.point_B is not None:
             painter.drawBigPoint(*calibration.point_B)

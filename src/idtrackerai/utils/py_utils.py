@@ -1,11 +1,11 @@
 import json
 import logging
 import re
-from importlib import metadata
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import wraps
+from importlib import metadata
 from math import sqrt
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from shutil import rmtree
@@ -335,6 +335,10 @@ class LengthCalibration:
         obj.point_A = d.get("point_A")
         obj.point_B = d.get("point_B")
         obj.distance = d.get("distance")
+        # `color` is not serialised (it is reassigned on load from the
+        # validator's palette) but this is a slots dataclass, so leaving the
+        # slot empty makes every later read of `.color` an AttributeError.
+        obj.color = d.get("color", 0x000000)
         return obj
 
     def value(self) -> float | None:
@@ -550,9 +554,14 @@ def json_default(obj):
         case Path():
             return str(obj)
         case LengthCalibration():
-            out = asdict(obj)
-            out.pop("color")
-            return out
+            # Built by hand rather than with asdict(): a calibration restored
+            # by an older version of from_dict has no `color` slot at all, and
+            # asdict() would raise on it.
+            return {
+                "point_A": obj.point_A,
+                "point_B": obj.point_B,
+                "distance": obj.distance,
+            }
         case Timer():
             return vars(obj)
         case np.integer():
