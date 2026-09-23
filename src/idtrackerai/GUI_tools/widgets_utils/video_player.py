@@ -356,11 +356,24 @@ class VideoPlayer(QWidget):
             self.backward_loop.start()
 
     def keyPressEvent_from_eventFilter(self, event: QKeyEvent) -> bool:
-        if (
-            event.isAutoRepeat()
-            or not self.isEnabled()
-            or event.modifiers()
-            not in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier)
+        if not self.isEnabled():
+            return False
+
+        # Auto-repeat is let through for the frame-step keys only, so that
+        # holding one scrubs through the video instead of stepping once. Every
+        # other shortcut here toggles something, and repeating a toggle is
+        # never what the user means.
+        if event.isAutoRepeat():
+            return event.key() in (
+                Qt.Key.Key_D,
+                Qt.Key.Key_Right,
+                Qt.Key.Key_A,
+                Qt.Key.Key_Left,
+            )
+
+        if event.modifiers() not in (
+            Qt.KeyboardModifier.NoModifier,
+            Qt.KeyboardModifier.KeypadModifier,
         ):
             return False
         key = event.key()
