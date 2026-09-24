@@ -96,12 +96,16 @@ class Session:
     saved as that setup's profile. Applied to the frames, to the background
     model and to the identification images alike, so everything downstream
     sees the same picture."""
-    external_contours: None | Path | str = None
-    """Path to a sidecar file of contours computed by an external
+    external_contours: None | Path | str | list = None
+    """Sidecar file(s) of contours computed by an external
     instance-segmentation model (see
     :mod:`idtrackerai.base.animals_detection.external_contours`). When set,
     idtracker.ai does not threshold the video: it reads the animals' outlines
-    from this file and runs the rest of the pipeline unchanged."""
+    from these files and runs the rest of the pipeline unchanged.
+
+    One path per video path, in the same order, because the exporter writes one
+    file per clip while a session made of several clips is one timeline. A
+    single path is still accepted for a single-clip session."""
     # bkg_model: None | np.ndarray = None
     name: str = ""
     output_dir: Path | None | str = None
@@ -200,12 +204,33 @@ class Session:
         )
 
         if self.external_contours is not None:
-            self.external_contours = resolve_path(self.external_contours)
-            if not Path(self.external_contours).is_file():
+            given = (
+                [self.external_contours]
+                if isinstance(self.external_contours, (str, Path))
+                else list(self.external_contours)
+            )
+            if not given:
                 raise IdtrackeraiError(
-                    "External contour file not found:"
-                    f" {self.external_contours}"
+                    "external_contours is empty. Give one contour file per "
+                    "video path, or remove the parameter to use thresholding."
                 )
+            resolved = [resolve_path(path) for path in given]
+            missing = [path for path in resolved if not Path(path).is_file()]
+            if missing:
+                raise IdtrackeraiError(
+                    "External contour file(s) not found:\n    "
+                    + "\n    ".join(str(path) for path in missing)
+                )
+            if len(resolved) != len(self.video_paths):
+                raise IdtrackeraiError(
+                    f"{len(resolved)} external contour file(s) were given for "
+                    f"{len(self.video_paths)} video path(s). There must be one "
+                    "per video, in the same order, because they are read as one "
+                    "continuous recording."
+                )
+            # A single video keeps a single path, so sessions written before
+            # several were supported round-trip through the .toml unchanged.
+            self.external_contours = resolved[0] if len(resolved) == 1 else resolved
             # Neither threshold segments anything now. area_ths still filters
             # stray detections, so it keeps its meaning; intensity_ths has none.
             if self.area_ths is None:

@@ -53,8 +53,9 @@ workable. These are described in VALIDATOR.md.
 Files changed relative to the fork point:
 
   src/idtrackerai/base/animals_detection/segmentation.py
-      process_frame() takes an optional external contour source and frame
-      number, and short-circuits to contours_from_external() instead of
+      process_frame() takes an optional external contour source -- one
+      file or one per video path -- and a frame number, and short-circuits
+      to contours_from_external() instead of
       thresholding. New function contours_from_external(). It also takes an
       optional enhancement, applied before thresholding in place of the plain
       greyscale conversion; generate_frame_stack() and compute_background()
@@ -71,8 +72,9 @@ Files changed relative to the fork point:
   src/idtrackerai/session.py
       New enhancement parameter carrying the frame enhancement chosen in the
       Segmentation App, so it round-trips through the session .toml and
-      reaches segmentation. New external_contours parameter, resolved and
-      checked in
+      reaches segmentation. New external_contours parameter, which takes one
+      contour file per video path so the clips of one recording can be
+      tracked as a single session, resolved and checked in
       prepare_tracking(). New presence_intervals parameter recording, per
       identity, the frames in which that animal is present; the Validator
       stops reporting an identity as missing outside them. Fixed

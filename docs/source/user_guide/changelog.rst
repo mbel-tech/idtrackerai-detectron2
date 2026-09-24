@@ -61,7 +61,11 @@ Segmentation changes
 
 - New ``external_contours`` session parameter: animal outlines are read from a
   sidecar file produced by an external instance-segmentation model instead of
-  being found by thresholding.
+  being found by thresholding. It takes one file per video path, so a
+  recording saved in several clips is tracked as one session with identities
+  carried across the joins. The Segmentation App pairs files to clips by name,
+  which makes the order right by construction, and refuses rather than
+  tracking part of a session when a clip has no file.
 - The Segmentation App gains a segmentation-source selector and a guided panel
   for sampling frames, annotating them and building a Detectron2 dataset.
 - The preparation panel keeps its own list of videos to draw annotation frames

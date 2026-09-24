@@ -1,5 +1,7 @@
 import logging
 
+import cv2
+
 from idtrackerai import IdtrackeraiError, ListOfBlobs, Session
 from idtrackerai.utils import create_dir, remove_dir
 
@@ -18,11 +20,25 @@ def animals_detection_API(session: Session) -> ListOfBlobs:
         create_dir(session.bbox_images_folder, remove_existing=True)
 
     if session.external_contours is not None:
+        # Per-clip frame counts, so a file that does not line up is named
+        # along with its video rather than showing only as a wrong total.
+        # A wrong ORDER sums correctly, and this is what catches it.
+        per_video_frames = None
+        try:
+            per_video_frames = [
+                int(cv2.VideoCapture(str(path)).get(cv2.CAP_PROP_FRAME_COUNT))
+                for path in session.video_paths
+            ]
+        except Exception:  # noqa: BLE001 - the totals check still applies
+            logging.debug("Could not read per-video frame counts", exc_info=True)
+
         validate_against_video(
             session.external_contours,
             session.number_of_frames,
             session.width,
             session.height,
+            video_paths=session.video_paths,
+            per_video_frames=per_video_frames,
         )
 
     bkg_model = session.bkg_model

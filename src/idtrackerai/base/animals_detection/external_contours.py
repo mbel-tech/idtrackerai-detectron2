@@ -31,6 +31,7 @@ free-form provenance (``source``, ``model``, ``score_threshold``, ...).
 
 import logging
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -110,47 +111,185 @@ class ExternalContours:
         )
 
 
-def get_external_contours(path: Path | str) -> ExternalContours:
-    """Per-process cached accessor, safe to call from multiprocessing workers."""
-    key = (os.getpid(), str(path))
+class ContourSequence:
+    """Several files read as one timeline, for a session made of several clips.
+
+    idtracker.ai treats a list of videos as one concatenated recording, while
+    the exporter writes one file per clip, so tracking the segments of a trial
+    together needs the two views reconciled. Global frame ``f`` belongs to the
+    file whose span contains it, and is read at its offset within that file.
+
+    The order of ``paths`` must match the order of the session's video paths.
+    Nothing here can detect a wrong order -- the contours would simply be
+    applied to the wrong frames -- so the caller pairs them by name and the
+    frame counts are checked per clip before tracking starts.
+    """
+
+    def __init__(self, paths: Sequence[Path | str]):
+        paths = [Path(p) for p in paths]
+        if not paths:
+            raise ValueError("No external contour files were given")
+        self.paths = paths
+        self.readers = [ExternalContours(p) for p in paths]
+
+        # global frame -> file, by binary search on the cumulative boundaries
+        self._boundaries = np.cumsum(
+            [0] + [reader.n_frames for reader in self.readers]
+        )
+        self.n_frames = int(self._boundaries[-1])
+
+        sizes = {(reader.width, reader.height) for reader in self.readers}
+        if len(sizes) != 1:
+            detail = ", ".join(
+                f"{r.path.name} {r.width}x{r.height}" for r in self.readers
+            )
+            self.close()
+            raise ValueError(
+                "External contour files were computed at different sizes, so "
+                f"they cannot describe one recording: {detail}"
+            )
+        self.width, self.height = sizes.pop()
+
+    def file_of(self, frame_number: int) -> tuple[int, int]:
+        """(index of the file, frame number within it) for a global frame."""
+        index = int(np.searchsorted(self._boundaries, frame_number, "right")) - 1
+        return index, frame_number - int(self._boundaries[index])
+
+    def contours_in_frame(self, frame_number: int) -> list[np.ndarray]:
+        if not 0 <= frame_number < self.n_frames:
+            return []
+        index, local = self.file_of(frame_number)
+        return self.readers[index].contours_in_frame(local)
+
+    @property
+    def attrs(self) -> dict[str, Any]:
+        """Provenance of the first file; they come from one export run."""
+        return self.readers[0].attrs if self.readers else {}
+
+    def close(self) -> None:
+        for reader in getattr(self, "readers", []):
+            reader.close()
+
+    def __repr__(self) -> str:
+        return (
+            f"ContourSequence({len(self.readers)} files, {self.n_frames} frames, "
+            f"{self.width}x{self.height})"
+        )
+
+
+def _as_paths(path_or_paths) -> list[Path]:
+    """One path or many, always as a list."""
+    if isinstance(path_or_paths, (str, Path)):
+        return [Path(path_or_paths)]
+    return [Path(p) for p in path_or_paths]
+
+
+def get_external_contours(path_or_paths) -> "ExternalContours | ContourSequence":
+    """Per-process cached accessor, safe to call from multiprocessing workers.
+
+    Accepts one path or several. Several are read as one concatenated
+    timeline, matching how a session treats several video files.
+    """
+    paths = _as_paths(path_or_paths)
+    key = (os.getpid(), tuple(str(p) for p in paths))
     if key not in _OPEN_FILES:
-        _OPEN_FILES[key] = ExternalContours(path)
-        logging.debug("Opened external contours %s in pid %d", path, os.getpid())
+        _OPEN_FILES[key] = (
+            ExternalContours(paths[0]) if len(paths) == 1 else ContourSequence(paths)
+        )
+        logging.debug(
+            "Opened %d external contour file(s) in pid %d", len(paths), os.getpid()
+        )
     return _OPEN_FILES[key]
 
 
 def validate_against_video(
-    path: Path | str, n_frames: int, width: int, height: int
+    path_or_paths,
+    n_frames: int,
+    width: int,
+    height: int,
+    video_paths: Sequence[Path | str] | None = None,
+    per_video_frames: Sequence[int] | None = None,
 ) -> None:
-    """Fails early, before segmenting, if the sidecar does not match the video.
+    """Fails early, before segmenting, if the sidecars do not match the video.
 
     A silent mismatch here would be expensive: contours would be applied to the
     wrong frames and the error would only surface as nonsensical trajectories.
+    With several files the risk is worse, because a wrong *order* still adds up
+    to the right total, so when the caller can say how long each clip is, every
+    file is checked against its own clip rather than only against the sum.
     """
-    contours = ExternalContours(path)
+    paths = _as_paths(path_or_paths)
+    if not paths:
+        raise ValueError("No external contour files were given")
+
+    readers = [ExternalContours(p) for p in paths]
     try:
         problems = []
-        if contours.n_frames != n_frames:
-            problems.append(
-                f"it covers {contours.n_frames} frames but the video has {n_frames}"
+        total = sum(reader.n_frames for reader in readers)
+
+        # per clip first: it says which file is wrong, not merely that one is
+        if per_video_frames is not None:
+            if len(per_video_frames) != len(readers):
+                problems.append(
+                    f"{len(readers)} contour file(s) were given for "
+                    f"{len(per_video_frames)} video(s)"
+                )
+            else:
+                for i, (reader, expected) in enumerate(zip(readers, per_video_frames)):
+                    if reader.n_frames != expected:
+                        video = (
+                            Path(video_paths[i]).name
+                            if video_paths is not None and i < len(video_paths)
+                            else f"video {i + 1}"
+                        )
+                        problems.append(
+                            f"{reader.path.name} covers {reader.n_frames} frames "
+                            f"but {video} has {expected}"
+                        )
+
+        if total != n_frames:
+            listing = ", ".join(
+                f"{r.path.name} ({r.n_frames})" for r in readers
             )
-        if (contours.width, contours.height) != (width, height):
             problems.append(
-                f"it was computed at {contours.width}x{contours.height} but the "
-                f"video is {width}x{height}"
-            )
-        if problems:
-            raise ValueError(
-                f"External contour file {contours.path} does not match the video: "
-                + "; ".join(problems)
+                f"they cover {total} frames in total but the session has "
+                f"{n_frames}: {listing}"
             )
 
-        logging.info("Using external contours: %s", contours)
+        sizes = {(r.width, r.height) for r in readers}
+        if len(sizes) > 1:
+            detail = ", ".join(f"{r.path.name} {r.width}x{r.height}" for r in readers)
+            problems.append(f"they were computed at different sizes: {detail}")
+        elif sizes and sizes != {(width, height)}:
+            got_w, got_h = next(iter(sizes))
+            problems.append(
+                f"they were computed at {got_w}x{got_h} but the video is "
+                f"{width}x{height}"
+            )
+
+        if problems:
+            what = (
+                f"External contour file {readers[0].path}"
+                if len(readers) == 1
+                else f"The {len(readers)} external contour files"
+            )
+            raise ValueError(f"{what} does not match the video: " + "; ".join(problems))
+
+        if len(readers) == 1:
+            logging.info("Using external contours: %s", readers[0])
+        else:
+            logging.info(
+                "Using %d external contour files covering %d frames:",
+                len(readers), total,
+            )
+            for reader in readers:
+                logging.info("    %s (%d frames)", reader.path.name, reader.n_frames)
         for key in ("source", "model", "score_threshold", "created"):
-            if key in contours.attrs:
-                logging.info("    %s: %s", key, contours.attrs[key])
+            if key in readers[0].attrs:
+                logging.info("    %s: %s", key, readers[0].attrs[key])
     finally:
-        contours.close()
+        for reader in readers:
+            reader.close()
 
 
 def write_contours(

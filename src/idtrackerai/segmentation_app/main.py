@@ -415,7 +415,12 @@ class SegmentationGUI(GUIBase):
 
         external_contours = self.segmentation_source.value()
         if external_contours is not None:
-            out["external_contours"] = str(external_contours)
+            # a list for a multi-clip session, one path per clip in order
+            out["external_contours"] = (
+                [str(path) for path in external_contours]
+                if isinstance(external_contours, list)
+                else str(external_contours)
+            )
 
         if self.session_name.text():  # put the name at the first position
             out = {"name": self.session_name.text()} | out
@@ -492,7 +497,7 @@ class SegmentationGUI(GUIBase):
             "&".join(Path(path).stem for path in video_paths)
         )
         self.ROI_Widget.set_video_size(video_size)
-        self.segmentation_source.set_video_info(n_frames, video_size)
+        self.segmentation_source.set_video_info(n_frames, video_size, video_paths)
         self.detectron2_panel.set_video_context(video_paths, self.session.output_dir)
         self.videoPlayer.setEnabled(False)
         self.tracking_interval.reset(n_frames)
