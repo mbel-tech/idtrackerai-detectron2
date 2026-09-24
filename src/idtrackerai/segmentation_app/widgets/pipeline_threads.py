@@ -202,6 +202,7 @@ class Sam3PrelabelThread(QThread):
         super().__init__()
         self.summary = None
         self.abort = False
+        self._reported_total = None
 
     def set_parameters(
         self,
@@ -227,6 +228,15 @@ class Sam3PrelabelThread(QThread):
 
     def quit(self):
         self.abort = True
+
+    def _progress(self, done: int, total: int) -> None:
+        # The dialog is created with a maximum of 100. Without this the bar
+        # fills at frame 100 of however many there are and stays full, which
+        # on a long run is indistinguishable from a hang.
+        if total != self._reported_total:
+            self._reported_total = total
+            self.set_progress_max.emit(max(total, 1))
+        self.set_progress_value.emit(done)
 
     def run(self):
         # Imported here, not at module scope: torch and sam3 are optional and
@@ -267,7 +277,7 @@ class Sam3PrelabelThread(QThread):
                 predictor=predictor,
                 label=self.label,
                 overwrite=self.overwrite,
-                progress=lambda done, total: self.set_progress_value.emit(done),
+                progress=self._progress,
                 abort=lambda: self.abort,
             )
         except (PipelineError, FileNotFoundError) as exc:
@@ -284,12 +294,15 @@ class Sam3ExportThread(QThread):
 
     set_progress_value = Signal(int)
     set_progress_max = Signal(int)
+    set_progress_label = Signal(str)
     failed = Signal(str)
 
     def __init__(self):
         super().__init__()
         self.written: list[Path] = []
+        self.skipped: list[Path] = []
         self.abort = False
+        self._reported_total = None
 
     def set_parameters(
         self,
@@ -302,6 +315,7 @@ class Sam3ExportThread(QThread):
         max_instances: int,
         enhancement: dict,
         on_overlap: str = "merge",
+        overwrite: bool = False,
     ) -> None:
         self.videos = videos
         self.output_dir = output_dir
@@ -312,11 +326,23 @@ class Sam3ExportThread(QThread):
         self.max_instances = max_instances
         self.enhancement = enhancement
         self.on_overlap = on_overlap
+        self.overwrite = overwrite
         self.written = []
+        self.skipped = []
         self.abort = False
+        self._reported_total = None
 
     def quit(self):
         self.abort = True
+
+    def _progress(self, done: int, total: int) -> None:
+        """Per clip, because the total frame count of a batch is not known
+        without opening every file. The label says which clip, so a bar that
+        starts again is readable rather than alarming."""
+        if total != self._reported_total:
+            self._reported_total = total
+            self.set_progress_max.emit(max(total, 1))
+        self.set_progress_value.emit(done)
 
     def run(self):
         from argparse import Namespace
@@ -377,10 +403,24 @@ class Sam3ExportThread(QThread):
 
         try:
             write_contours = inference_mod.load_writer()
-            for video in self.videos:
+            for index, video in enumerate(self.videos, start=1):
                 if self.abort:
                     break
                 output = self.output_dir / f"{video.stem}.h5"
+
+                # Resume, as the command line does. An export runs for hours,
+                # and redoing a clip that already has its file would throw that
+                # away every time someone cancels and comes back. The file is
+                # still reported as written, so the session adopts the whole
+                # set rather than only this run's share of it.
+                if output.exists() and not self.overwrite:
+                    self.skipped.append(output)
+                    self.written.append(output)
+                    continue
+
+                self.set_progress_label.emit(
+                    f"SAM 3 on {video.name}  ({index} of {len(self.videos)})"
+                )
                 stats = inference_mod.export_video(
                     video,
                     output,
@@ -390,7 +430,7 @@ class Sam3ExportThread(QThread):
                     enhance,
                     self.enhancement,
                     write_contours,
-                    progress=lambda done, total: self.set_progress_value.emit(done),
+                    progress=self._progress,
                     abort=lambda: self.abort,
                 )
                 if stats is None:  # cancelled part-way; nothing was written

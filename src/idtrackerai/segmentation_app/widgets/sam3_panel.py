@@ -166,9 +166,14 @@ class Sam3Panel(QWidget):
         self.export_explanation.setText(
             "Writes one contour file per clip, the same format the Detectron2 "
             "pipeline produces. When it finishes, this session switches to "
-            "those contours automatically."
+            "those contours automatically.' + N + N + '"
+            "Clips that already have a contour file are skipped, so a run that "
+            "was cancelled can be picked up where it stopped."
         )
         layout.addWidget(self.export_explanation)
+
+        self.reexport = QCheckBox("Re-export clips that already have contours")
+        layout.addWidget(self.reexport)
 
         self.export_button = QPushButton("Export contours")
         self.export_button.clicked.connect(self.run_export)
@@ -310,6 +315,7 @@ class Sam3Panel(QWidget):
             score_threshold=self.score_threshold.value(),
             max_instances=self.max_instances.value(),
             enhancement=self.settings(),
+            overwrite=self.reexport.isChecked(),
         )
         self.export_thread.start()
 
@@ -335,16 +341,29 @@ class Sam3Panel(QWidget):
         QMessageBox.information(self, "Annotations drafted", message)
 
     def _export_finished(self) -> None:
+        """Reports what happened, once something else has decided what that is.
+
+        Whether the session can actually use these files is not this panel's
+        call: the source widget validates them against the video and refuses a
+        set that does not fit, which is exactly what a cancelled batch leaves
+        behind. So the outcome is reported by whoever adopts them, and this
+        says only what is true either way.
+        """
         written = self.export_thread.written
         if not written:
             return
+
+        skipped = self.export_thread.skipped
+        detail = f"{len(written) - len(skipped)} contour file(s) written to\n{written[0].parent}"
+        if skipped:
+            detail += (
+                f"\n\n{len(skipped)} clip(s) already had contours and were "
+                "left alone."
+            )
+        QMessageBox.information(self, "Export finished", detail)
+        # Adopting them, and saying whether that worked, belongs to whoever
+        # receives this.
         self.contoursReady.emit(written)
-        QMessageBox.information(
-            self,
-            "Contours exported",
-            f"{len(written)} contour file(s) written to\n{written[0].parent}\n\n"
-            "This session now tracks from them.",
-        )
 
     # ---------------------------------------------------------------- threads
     def _wire_threads(self) -> None:
@@ -358,6 +377,7 @@ class Sam3Panel(QWidget):
             thread.set_progress_value.connect(self._set_progress_value)
             thread.set_progress_max.connect(self._set_progress_max)
             thread.failed.connect(self._thread_failed)
+        self.export_thread.set_progress_label.connect(self._set_progress_label)
 
     def _thread_started(self, thread) -> None:
         self.progress = QProgressDialog("Running SAM 3...", "Cancel", 0, 100, self)
@@ -378,6 +398,10 @@ class Sam3Panel(QWidget):
         if hasattr(self, "progress"):
             self.progress.setMaximum(value)
 
+    def _set_progress_label(self, text: str) -> None:
+        if hasattr(self, "progress"):
+            self.progress.setLabelText(text)
+
     def _thread_failed(self, message: str) -> None:
         QMessageBox.critical(self, "SAM 3 failed", message)
 
@@ -393,6 +417,7 @@ class Sam3Panel(QWidget):
             (self.prelabel_button, "sam3_prelabel"),
             (self.overwrite, "sam3_overwrite"),
             (self.export_button, "sam3_export"),
+            (self.reexport, "sam3_reexport"),
         ]
         for widget, key in pairs:
             if key in tips:

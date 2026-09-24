@@ -120,7 +120,12 @@ set was built.
 ## Exporting contours
 
 In the app: **Segmentation → SAM 3 → Export contours**. When it finishes the
-session switches onto the files it wrote.
+session switches onto the files it wrote, if they fit the video it has loaded.
+
+Like the command line, it skips clips that already have a contour file, so a
+run cancelled after three hours is picked up where it stopped rather than
+started again. Tick *Re-export clips that already have contours* when the
+existing files were made with a prompt or a confidence you no longer want.
 
 From a terminal, it is the Detectron2 exporter with a different backend:
 
@@ -152,7 +157,9 @@ shadows and the reflections. The prompt is also the class name written into
 drafted annotations, so it should be the label you would have typed yourself.
 
 `--score-threshold` trades misses against false positives. Raise it when the
-background is being detected; lower it when animals are missed. On genuinely
+background is being detected; lower it when animals are missed — it is passed
+to SAM 3 itself, so lowering it genuinely admits weaker detections rather than
+filtering an already-filtered list. On genuinely
 hard footage neither setting rescues it, which is the honest limit of a model
 that has never seen your setup — and the point at which drafting-then-training
 is the better use of it.

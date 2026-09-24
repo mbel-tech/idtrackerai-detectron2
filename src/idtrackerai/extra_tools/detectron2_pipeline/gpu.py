@@ -40,9 +40,19 @@ try:
     report["detectron2"] = getattr(detectron2, "__version__", "unknown")
 except Exception:
     pass
+# Looked up rather than imported. Importing sam3 pulls in timm and a good
+# deal else, and this probe answers for Detectron2 too: a slow import here
+# would push the one subprocess past its timeout and report a machine that
+# can train as one that cannot. Presence is enough, because loading it for
+# real happens later and reports its own errors.
 try:
-    import sam3
-    report["sam3"] = getattr(sam3, "__version__", "unknown")
+    import importlib.metadata
+    import importlib.util
+    if importlib.util.find_spec("sam3") is not None:
+        try:
+            report["sam3"] = importlib.metadata.version("sam3")
+        except Exception:
+            report["sam3"] = "unknown"
 except Exception:
     pass
 print(json.dumps(report))

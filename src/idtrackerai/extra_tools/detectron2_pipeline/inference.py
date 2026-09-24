@@ -389,6 +389,10 @@ def export_video(
             contours_per_frame.append([])
             scores_per_frame.append([])
             empty_frames += 1
+            # Report it here too: a run whose tail is unreadable would
+            # otherwise leave the bar short of the end, which reads as a hang.
+            if progress is not None:
+                progress(frame_index + 1, n_frames)
             continue
 
         masks, scores = predictor.predict(enhance(frame))

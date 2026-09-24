@@ -188,3 +188,159 @@ def test_every_control_it_labels_has_a_tooltip(panel):
     panel.setToolTips(tips)
     assert panel.prompt.toolTip()
     assert panel.export_button.toolTip()
+
+
+# ------------------------------------------------------------ the export batch
+# An export runs for hours, so what happens when it is interrupted matters more
+# than what happens when it is not.
+
+
+@pytest.fixture
+def export_thread(monkeypatch, tmp_path):
+    """A Sam3ExportThread with the model and the exporter stubbed out.
+
+    run() is called directly rather than through start(): this is about the
+    batch loop, not about threading.
+    """
+    from idtrackerai.extra_tools.detectron2_pipeline import inference as inference_mod
+    from idtrackerai.segmentation_app.widgets.pipeline_threads import Sam3ExportThread
+
+    exported = []
+
+    def fake_export_video(video, output, *args, **kwargs):
+        exported.append(Path(video).name)
+        Path(output).write_bytes(b"contours")
+        return {"video": Path(video).name, "frames": 1}
+
+    monkeypatch.setattr(inference_mod, "export_video", fake_export_video)
+    monkeypatch.setattr(inference_mod, "load_writer", lambda: (lambda *a, **k: None))
+
+    import idtrackerai.extra_tools.detectron2_pipeline.sam3_predictor as predictor_mod
+
+    monkeypatch.setattr(
+        predictor_mod, "Sam3Predictor", lambda **kw: type("P", (), {"description": "fake"})()
+    )
+
+    thread = Sam3ExportThread()
+    return thread, exported, tmp_path, monkeypatch
+
+
+def make_clips(folder, names):
+    clips = []
+    for name in names:
+        path = folder / name
+        path.write_bytes(b"video")
+        clips.append(path)
+    return clips
+
+
+def test_clips_that_already_have_contours_are_not_redone(export_thread):
+    """Cancel three hours into five clips, come back, and keep the three."""
+    thread, exported, tmp_path, _ = export_thread
+    out = tmp_path / "contours"
+    out.mkdir()
+    clips = make_clips(tmp_path, ["a.mp4", "b.mp4", "c.mp4"])
+    (out / "a.h5").write_bytes(b"done earlier")
+
+    thread.set_parameters(
+        videos=clips, output_dir=out, weights=tmp_path / "sam3.pt",
+        prompt="fish", device="cpu", score_threshold=0.5,
+        max_instances=0, enhancement={},
+    )
+    thread.run()
+
+    assert exported == ["b.mp4", "c.mp4"]
+    assert [p.name for p in thread.skipped] == ["a.h5"]
+
+
+def test_the_session_still_gets_every_clip_it_needs(export_thread):
+    """Skipped is not the same as missing: the whole set must be adopted."""
+    thread, _, tmp_path, monkeypatch = export_thread
+    out = tmp_path / "contours"
+    out.mkdir()
+    clips = make_clips(tmp_path, ["a.mp4", "b.mp4", "c.mp4"])
+    (out / "a.h5").write_bytes(b"done earlier")
+
+    thread.set_parameters(
+        videos=clips, output_dir=out, weights=tmp_path / "sam3.pt",
+        prompt="fish", device="cpu", score_threshold=0.5,
+        max_instances=0, enhancement={},
+    )
+    thread.run()
+
+    assert [p.name for p in thread.written] == ["a.h5", "b.h5", "c.h5"]
+
+
+def test_re_export_is_available_when_it_is_what_you_meant(export_thread):
+    thread, exported, tmp_path, _ = export_thread
+    out = tmp_path / "contours"
+    out.mkdir()
+    clips = make_clips(tmp_path, ["a.mp4", "b.mp4"])
+    (out / "a.h5").write_bytes(b"done earlier")
+
+    thread.set_parameters(
+        videos=clips, output_dir=out, weights=tmp_path / "sam3.pt",
+        prompt="fish", device="cpu", score_threshold=0.5,
+        max_instances=0, enhancement={}, overwrite=True,
+    )
+    thread.run()
+
+    assert exported == ["a.mp4", "b.mp4"]
+    assert thread.skipped == []
+
+
+def test_the_progress_bar_is_given_a_maximum(export_thread, qt_app):
+    """Without it the dialog stays at 100 while the value counts frames."""
+    from idtrackerai.extra_tools.detectron2_pipeline import inference as inference_mod
+
+    thread, _, tmp_path, monkeypatch = export_thread
+    out = tmp_path / "contours"
+    out.mkdir()
+    maxima = []
+    thread.set_progress_max.connect(maxima.append)
+
+    def export_reporting_progress(video, output, *args, progress=None, **kwargs):
+        Path(output).write_bytes(b"c")
+        for frame in range(1, 4):
+            progress(frame, 3)
+        return {"video": Path(video).name, "frames": 3}
+
+    monkeypatch.setattr(inference_mod, "export_video", export_reporting_progress)
+    thread.set_parameters(
+        videos=make_clips(tmp_path, ["a.mp4"]), output_dir=out,
+        weights=tmp_path / "sam3.pt", prompt="fish", device="cpu",
+        score_threshold=0.5, max_instances=0, enhancement={},
+    )
+    thread.run()
+
+    assert maxima == [3]
+
+
+def test_a_finished_export_does_not_claim_the_session_adopted_it(panel, tmp_path):
+    """Whether the contours fit is the source widget's call, not the panel's.
+
+    A cancelled batch produces files that will be refused; announcing success
+    here would contradict the warning the user is about to see.
+    """
+    from idtrackerai.segmentation_app.widgets import sam3_panel as panel_mod
+
+    shown = []
+    panel.export_thread.written = [tmp_path / "a.h5"]
+    panel.export_thread.skipped = []
+    emitted = []
+    panel.contoursReady.connect(emitted.append)
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(
+        panel_mod.QMessageBox, "information",
+        staticmethod(lambda *a, **k: shown.append(a[2])),
+    )
+    try:
+        panel._export_finished()
+    finally:
+        mp.undo()
+
+    assert emitted == [[tmp_path / "a.h5"]]
+    assert shown, "the user should still be told the export finished"
+    assert "tracks from them" not in shown[0]
+    assert "written to" in shown[0]

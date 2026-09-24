@@ -61,13 +61,9 @@ except ImportError:  # loaded by path, e.g. from a Colab bundle
 
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
-# Written by the sampling step; they live beside the frames but are not
-# annotations, and the dataset step ignores them for the same reason.
-RESERVED_JSON = {
-    "sampling_manifest.json",
-    "preprocess_profile.json",
-    "report.json",
-}
+# The sidecars the sampling step leaves beside the frames -- sampling_manifest,
+# preprocess_profile, report -- need no special handling: find_frames only
+# returns images, so they are never candidates in the first place.
 
 
 def find_frames(folder: Path) -> list[Path]:
@@ -169,8 +165,6 @@ def prelabel(
             break
 
         annotation_path = frame_path.with_suffix(".json")
-        if annotation_path.name in RESERVED_JSON:
-            continue
         if annotation_path.exists() and not overwrite:
             # Corrected by hand, most likely. Never clobber it.
             summary["skipped_existing"] += 1
@@ -181,6 +175,8 @@ def prelabel(
         image = read_image(frame_path)
         if image is None:
             summary["unreadable"].append(frame_path.name)
+            if progress is not None:
+                progress(done, len(frames))
             continue
 
         masks, _ = predictor.predict(image)

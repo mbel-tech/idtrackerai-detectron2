@@ -90,11 +90,9 @@ class SegmentationGUI(GUIBase):
         # so GUIBase.closeEvent gives it a chance to stop threads and save
         self.widgets_to_close.append(self.detectron2_panel)
         self.widgets_to_close.append(self.sam3_panel)
-        # an export hands its contour files straight to the source widget,
-        # which validates them and switches the session onto them
-        self.sam3_panel.contoursReady.connect(
-            self.segmentation_source.accept_paths
-        )
+        # an export hands its contour files to the source widget, which
+        # validates them against the video before the session adopts them
+        self.sam3_panel.contoursReady.connect(self.sam3_contours_ready)
         self.intensity_thresholds = IntensityThresholds(self, min=0, max=255)
         self.area_thresholds = AreaThresholds()
 
@@ -318,6 +316,26 @@ class SegmentationGUI(GUIBase):
         self.bkg_widget.bkg_thread.frame_stack = None
         self.detectron2_panel.enhancement_committed(settings)
         self.sam3_panel.enhancement_committed(settings)
+
+    def sam3_contours_ready(self, paths) -> None:
+        """Adopts contours SAM 3 just exported, and says whether it worked.
+
+        accept_paths validates them against the loaded video and refuses a set
+        that does not fit -- which is what a cancelled batch leaves behind, and
+        what a clip exported at the wrong resolution would produce. It warns on
+        its own when it refuses, so the only thing left to say here is the good
+        news, and only when it is true. Announcing success from the panel
+        instead would claim the session had switched over in exactly the cases
+        where it had not.
+        """
+        if self.segmentation_source.accept_paths(paths):
+            QMessageBox.information(
+                self,
+                "Tracking from the exported contours",
+                f"This session now segments from the {len(paths)} contour "
+                "file(s) SAM 3 wrote. The intensity thresholds and background "
+                "model take no further part.",
+            )
 
     def segmentation_source_changed(self, path: Path | None) -> None:
         """Keeps the preview in step with the chosen contour file."""

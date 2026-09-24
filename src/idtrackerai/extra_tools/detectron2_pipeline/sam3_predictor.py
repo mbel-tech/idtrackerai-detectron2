@@ -113,7 +113,18 @@ class Sam3Predictor:
             load_from_HF=False,
             device=self.device,
         )
-        self._processor = Sam3Processor(model)
+        # The processor keeps its own device and its own confidence threshold,
+        # and both of its defaults are wrong for us. device defaults to "cuda"
+        # and it allocates tensors in its constructor, so leaving it out undoes
+        # the CPU fallback above and crashes before the first frame.
+        # confidence_threshold defaults to 0.5 and is applied *inside* the
+        # model's forward pass, so leaving it out puts a floor under
+        # --score-threshold: anything lower would be filtered out before we
+        # ever saw it, and lowering the threshold to recover missed animals
+        # would silently do nothing.
+        self._processor = Sam3Processor(
+            model, device=self.device, confidence_threshold=score_threshold
+        )
         self.description = f"sam3 ({prompt!r})"
 
     def predict(self, frame: np.ndarray):
@@ -133,6 +144,10 @@ class Sam3Predictor:
         if masks is None or len(masks) == 0:
             return [], []
 
+        # The processor already filtered on this same quantity, so this keeps
+        # nothing out that it let through. It stays because the threshold is
+        # ours to enforce and should not depend on the processor continuing to
+        # apply the value it was constructed with.
         keep = [i for i, s in enumerate(scores) if float(s) >= self.score_threshold]
         # Keep the most confident ones when more were found than there are
         # animals. The export loop's own --max-instances only counts what it
