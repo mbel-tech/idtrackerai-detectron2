@@ -31,11 +31,32 @@ def qt_app():
     yield app
 
 
+def report(cuda=False, sam3=None, detectron2=None, torch="2.7.0"):
+    """A GpuReport in a known state, so tests do not depend on this machine."""
+    from idtrackerai.extra_tools.detectron2_pipeline.gpu import GpuReport
+
+    return GpuReport(
+        torch_version=torch,
+        detectron2_version=detectron2,
+        sam3_version=sam3,
+        cuda_available=cuda,
+        device_name="Test GPU" if cuda else None,
+        checked=True,
+    )
+
+
 @pytest.fixture
 def panel(qt_app):
     from idtrackerai.segmentation_app.widgets import EnhancementWidget, Sam3Panel
 
-    return Sam3Panel(EnhancementWidget())
+    widget = Sam3Panel(EnhancementWidget())
+    # The panel probes the real machine on construction. Pin it instead, so
+    # these assertions mean the same thing on a laptop and on a CUDA box.
+    widget.gpu_thread.wait(30000)
+    widget.gpu = report()
+    widget._refresh_enabled()
+    yield widget
+    widget.close()
 
 
 def test_the_selector_offers_sam3(qt_app):
@@ -85,7 +106,31 @@ def test_export_stays_disabled_without_a_gpu(panel, tmp_path):
     panel.weights = tmp_path / "sam3.pt"
     panel.set_video_context([tmp_path / "clip.mp4"])
 
-    assert panel.export_button.isEnabled() is panel.has_gpu
+    assert not panel.has_gpu
+    assert not panel.export_button.isEnabled()
+
+
+def test_export_is_offered_once_sam3_can_actually_run(panel, tmp_path):
+    panel.weights = tmp_path / "sam3.pt"
+    panel.set_video_context([tmp_path / "clip.mp4"])
+    panel.gpu = report(cuda=True, sam3="0.1.4")
+    panel._refresh_enabled()
+
+    assert panel.has_gpu
+    assert panel.export_button.isEnabled()
+
+
+def test_sam3_does_not_wait_for_detectron2(panel, tmp_path):
+    """GpuReport.usable wants Detectron2; SAM 3 has no use for it.
+
+    Sharing one notion of "usable" would refuse SAM 3 on a machine that can
+    run it perfectly well.
+    """
+    panel.gpu = report(cuda=True, sam3="0.1.4", detectron2=None)
+
+    assert not panel.gpu.usable
+    assert panel.gpu.sam3_usable
+    assert panel.has_gpu
 
 
 def test_drafting_needs_a_frames_folder(panel, tmp_path):
@@ -108,7 +153,21 @@ def test_an_empty_prompt_blocks_everything(panel, tmp_path):
 
 
 def test_the_colab_route_is_offered_exactly_when_it_is_needed(panel):
-    assert panel.colab_hint.isVisibleTo(panel) is not panel.has_gpu
+    assert panel.colab_hint.isVisibleTo(panel)
+
+    panel.gpu = report(cuda=True, sam3="0.1.4")
+    panel._refresh_enabled()
+    assert not panel.colab_hint.isVisibleTo(panel)
+
+
+def test_it_says_what_is_missing_rather_than_just_no(panel):
+    panel.gpu = report(cuda=False, sam3=None)
+    text = panel._gpu_text()
+
+    assert "CUDA" in text
+    assert "sam3" in text
+    # and that drafting is still possible, which is the useful half
+    assert "CPU" in text
 
 
 def test_every_control_it_labels_has_a_tooltip(panel):

@@ -46,35 +46,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from idtrackerai.extra_tools.detectron2_pipeline import gpu as gpu_mod
 from idtrackerai.GUI_tools import WrappedLabel
 
-from .pipeline_threads import Sam3ExportThread, Sam3PrelabelThread
-
-
-def describe_gpu() -> tuple[bool, str]:
-    """Reports whether a CUDA device is usable, and says why when it is not.
-
-    Everything is imported inside, because the app must open on a machine with
-    no torch at all, which is the common case.
-    """
-    try:
-        import torch  # noqa: PLC0415
-    except ImportError:
-        return False, (
-            "PyTorch is not installed here, so SAM 3 cannot run on this "
-            "machine. Use the Colab route below."
-        )
-    try:
-        if torch.cuda.is_available():
-            return True, f"GPU: {torch.cuda.get_device_name(0)}"
-    except Exception:  # noqa: BLE001  a broken driver must not stop the app
-        logging.exception("Could not query CUDA")
-        return False, "PyTorch could not query the GPU; see the log."
-    return False, (
-        "No CUDA GPU on this machine. Drafting annotations will work but be "
-        "slow; exporting a whole video will not be practical. Use Colab for "
-        "that."
-    )
+from .pipeline_threads import GpuCheckThread, Sam3ExportThread, Sam3PrelabelThread
 
 
 class Sam3Panel(QWidget):
@@ -90,23 +65,28 @@ class Sam3Panel(QWidget):
         self.frames_dir: Path | None = None
         self.weights: Path | None = None
 
-        self.has_gpu, gpu_message = describe_gpu()
+        # Unchecked until the probe comes back, so the panel opens instantly
+        # and says it is still looking rather than freezing on a torch import.
+        self.gpu = gpu_mod.GpuReport()
 
         self.prelabel_thread = Sam3PrelabelThread()
         self.export_thread = Sam3ExportThread()
+        self.gpu_thread = GpuCheckThread()
+        self.gpu_thread.reported.connect(self._gpu_reported)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
-        layout.addWidget(self._model_box(gpu_message))
+        layout.addWidget(self._model_box())
         layout.addWidget(self._prelabel_box())
         layout.addWidget(self._export_box())
         layout.addStretch()
 
         self._wire_threads()
         self._refresh_enabled()
+        self.check_gpu()
 
     # ------------------------------------------------------------ the model
-    def _model_box(self, gpu_message: str) -> QWidget:
+    def _model_box(self) -> QWidget:
         box = QGroupBox("SAM 3")
         grid = QGridLayout()
         box.setLayout(grid)
@@ -130,7 +110,7 @@ class Sam3Panel(QWidget):
         self.max_instances.setSpecialValueText("all")
 
         self.gpu_status = WrappedLabel()
-        self.gpu_status.setText(gpu_message)
+        self.gpu_status.setText(self._gpu_text())
 
         grid.addWidget(QLabel("Weights"), 0, 0)
         grid.addWidget(self.weights_label, 0, 1)
@@ -203,6 +183,44 @@ class Sam3Panel(QWidget):
         )
         layout.addWidget(self.colab_hint)
         return box
+
+    # ------------------------------------------------------- GPU capability
+    @property
+    def has_gpu(self) -> bool:
+        """Whether SAM 3 can run here: a CUDA GPU and the sam3 package.
+
+        Not ``GpuReport.usable``, which additionally wants Detectron2. SAM 3
+        needs neither Detectron2 nor a model of your own.
+        """
+        return self.gpu.sam3_usable
+
+    def _gpu_text(self) -> str:
+        if not self.gpu.checked:
+            return "Checking what this machine can do..."
+        if self.has_gpu:
+            where = self.gpu.device_name or "a CUDA GPU"
+            return f"SAM 3 can run here: {where}, sam3 {self.gpu.sam3_version}."
+        return (
+            "SAM 3 cannot run at full speed here: "
+            + "; ".join(self.gpu.sam3_missing)
+            + ". Drafting annotations will still work on the CPU, slowly. "
+            "Exporting a whole video will not."
+        )
+
+    def check_gpu(self) -> None:
+        if self.gpu_thread.isRunning():
+            return
+        self.gpu = gpu_mod.GpuReport()
+        self.gpu_status.setText(self._gpu_text())
+        self.gpu_thread.start()
+
+    def _gpu_reported(self, report) -> None:
+        self.gpu = report
+        text = self._gpu_text()
+        if not self.has_gpu:
+            text += "\n\n" + gpu_mod.SAM3_INSTALL_HINT
+        self.gpu_status.setText(text)
+        self._refresh_enabled()
 
     # ----------------------------------------------------------------- context
     def set_video_context(self, video_paths, output_dir=None) -> None:
@@ -383,7 +401,7 @@ class Sam3Panel(QWidget):
     # ---------------------------------------------------------------- closing
     def close(self) -> bool:
         """Stops any running work before the app exits."""
-        for thread in (self.prelabel_thread, self.export_thread):
+        for thread in (self.prelabel_thread, self.export_thread, self.gpu_thread):
             if thread.isRunning():
                 thread.quit()
                 thread.wait(5000)

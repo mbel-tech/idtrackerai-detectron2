@@ -258,6 +258,13 @@ Files added:
   docs/detectron2-pipeline.md
       Documentation for the pipeline above.
 
+  src/idtrackerai/extra_tools/detectron2_pipeline/gpu.py
+      The capability probe also reports whether the sam3 package is present,
+      with sam3_usable and sam3_missing beside the existing usable and
+      missing. SAM 3 needs a CUDA GPU and its own package but not
+      Detectron2, so one notion of "usable" would refuse it on a machine
+      that can run it.
+
   src/idtrackerai/extra_tools/detectron2_pipeline/sam3_predictor.py
       SAM 3 behind the same predict(frame) -> (masks, scores) interface the
       contour exporter uses for Detectron2. Prompts each frame independently

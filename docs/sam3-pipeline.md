@@ -56,6 +56,11 @@ It is not declared as a dependency of this fork, for the same reason Detectron2
 is not: it is heavy, it wants a GPU, and idtracker.ai has to keep working
 without it. Every import of it happens inside the function that needs it.
 
+You also need PyTorch built for your CUDA version, which PyPI's default wheel
+is not on Windows. `idtrackerai_d2_install_gpu` installs the right one — it was
+written for the Detectron2 stages but PyTorch is the same requirement here, so
+run it and then `pip install sam3`.
+
 ## Where it runs
 
 SAM 3 wants a CUDA GPU.
