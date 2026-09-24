@@ -34,6 +34,7 @@ from .widgets import (
     BkgWidget,
     BlobInfoWidget,
     Detectron2Panel,
+    Sam3Panel,
     EnhancementPreview,
     EnhancementWidget,
     FrameAnalyzer,
@@ -43,7 +44,7 @@ from .widgets import (
     SegmentationSourceWidget,
     TrackingIntervalsWidget,
 )
-from .widgets.segmentation_source import DETECTRON2, EXTERNAL, THRESHOLDING
+from .widgets.segmentation_source import DETECTRON2, EXTERNAL, SAM3, THRESHOLDING
 
 
 class SegmentationGUI(GUIBase):
@@ -80,12 +81,18 @@ class SegmentationGUI(GUIBase):
         self.enhancement = EnhancementWidget()
         self.enhancement_preview = EnhancementPreview()
         self.detectron2_panel = Detectron2Panel(self.enhancement)
+        self.sam3_panel = Sam3Panel(self.enhancement)
         # the preview is live in every mode, because the enhancement is applied
         # to segmentation in every mode
         self.enhancement_preview.set_enabled(True)
         self.detectron2_panel.setVisible(False)
+        self.sam3_panel.setVisible(False)
         # so GUIBase.closeEvent gives it a chance to stop threads and save
         self.widgets_to_close.append(self.detectron2_panel)
+        self.widgets_to_close.append(self.sam3_panel)
+        # an export hands its contour files to the source widget, which
+        # validates them against the video before the session adopts them
+        self.sam3_panel.contoursReady.connect(self.sam3_contours_ready)
         self.intensity_thresholds = IntensityThresholds(self, min=0, max=255)
         self.area_thresholds = AreaThresholds()
 
@@ -182,6 +189,7 @@ class SegmentationGUI(GUIBase):
         self.segmentation_source.browse.setToolTip(tooltips["external_contours"])
         self.enhancement.setToolTips(tooltips)
         self.detectron2_panel.setToolTips(tooltips)
+        self.sam3_panel.setToolTips(tooltips)
         self.bkg_widget.setToolTip(tooltips["background_subtraction"])
         self.bkg_widget.bkg_stat.setToolTip(tooltips["background_stat"])
         self.bkg_widget.view_bkg.setToolTip(tooltips["background_view"])
@@ -212,6 +220,7 @@ class SegmentationGUI(GUIBase):
             self.enhancement,
             self.segmentation_source,
             self.detectron2_panel,
+            self.sam3_panel,
             self.bkg_widget,
             self.intensity_thresholds,
             self.area_thresholds,
@@ -306,6 +315,27 @@ class SegmentationGUI(GUIBase):
         self.bkg_widget.bkg_thread.bkg = None
         self.bkg_widget.bkg_thread.frame_stack = None
         self.detectron2_panel.enhancement_committed(settings)
+        self.sam3_panel.enhancement_committed(settings)
+
+    def sam3_contours_ready(self, paths) -> None:
+        """Adopts contours SAM 3 just exported, and says whether it worked.
+
+        accept_paths validates them against the loaded video and refuses a set
+        that does not fit -- which is what a cancelled batch leaves behind, and
+        what a clip exported at the wrong resolution would produce. It warns on
+        its own when it refuses, so the only thing left to say here is the good
+        news, and only when it is true. Announcing success from the panel
+        instead would claim the session had switched over in exactly the cases
+        where it had not.
+        """
+        if self.segmentation_source.accept_paths(paths):
+            QMessageBox.information(
+                self,
+                "Tracking from the exported contours",
+                f"This session now segments from the {len(paths)} contour "
+                "file(s) SAM 3 wrote. The intensity thresholds and background "
+                "model take no further part.",
+            )
 
     def segmentation_source_changed(self, path: Path | None) -> None:
         """Keeps the preview in step with the chosen contour file."""
@@ -319,21 +349,26 @@ class SegmentationGUI(GUIBase):
         background model take part in segmentation, so they are greyed out:
         leaving them live would suggest they still do something.
 
-        Detectron2 mode goes further and hides them, because the panel needs
-        the vertical space and because nothing in that mode segments by
-        threshold at all.
+        The Detectron2 and SAM 3 modes go further and hide them, because their
+        panels need the vertical space and because neither segments by
+        threshold at all. Both are modes for producing contours rather than
+        tracking from them, so the live preview is suspended too: it has
+        nothing to draw until a model has run.
         """
         external = mode == EXTERNAL
         detectron2 = mode == DETECTRON2
+        sam3 = mode == SAM3
+        with_a_model = detectron2 or sam3
 
         self.detectron2_panel.setVisible(detectron2)
-        self.frame_analyzer.set_suspended(detectron2)
+        self.sam3_panel.setVisible(sam3)
+        self.frame_analyzer.set_suspended(with_a_model)
 
         for widget in (self.intensity_thresholds, self.bkg_widget):
-            widget.setVisible(not detectron2)
-            widget.setEnabled(not external and not detectron2)
+            widget.setVisible(not with_a_model)
+            widget.setEnabled(not external and not with_a_model)
         for widget in (self.area_thresholds, self.blobInfo):
-            widget.setVisible(not detectron2)
+            widget.setVisible(not with_a_model)
 
         self.update_enhancement_hint()
         self.videoPlayer.update()
@@ -515,6 +550,7 @@ class SegmentationGUI(GUIBase):
         self.ROI_Widget.set_video_size(video_size)
         self.segmentation_source.set_video_info(n_frames, video_size, video_paths)
         self.detectron2_panel.set_video_context(video_paths, self.session.output_dir)
+        self.sam3_panel.set_video_context(video_paths, self.session.output_dir)
         self.videoPlayer.setEnabled(False)
         self.tracking_interval.reset(n_frames)
         self.frame_analyzer.drawn_frame = -1

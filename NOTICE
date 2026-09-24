@@ -33,7 +33,7 @@ Statement of modifications (GPL-3.0 section 5a)
 
 Modified by Martina Bellio, from 2026-09-20.
 
-The modifications have two purposes.
+The modifications have three purposes.
 
 The first is to let animal outlines produced by an external
 instance-segmentation model (a fine-tuned Detectron2 Mask R-CNN) enter
@@ -44,7 +44,14 @@ unmodified. Alongside it, frame enhancement (CLAHE and correction for uneven
 lighting) became a control of the Segmentation App in its own right, applied
 to thresholding as much as to the Detectron2 route.
 
-The second is to make the Validator, the tool for correcting trajectories
+The second is to offer Meta's SAM 3 as a second such model, prompted with a
+word for the animal rather than trained on annotated frames. It writes the
+same contour files the Detectron2 route does, so nothing downstream of
+segmentation distinguishes them, and it also drafts LabelMe annotations for
+correction, which is a way of preparing a Detectron2 dataset rather than an
+alternative to one.
+
+The third is to make the Validator, the tool for correcting trajectories
 by hand after tracking, usable on long recordings: an undo stack, a save
 that survives an unwritable session folder, an autosave, three further
 editing operations, and filters that keep the list of reported errors
@@ -89,17 +96,18 @@ Files changed relative to the fork point:
       child below its natural size, which left a panel step too short to
       show its own button; scrolling the column lets each widget be the
       size it asked for, in every mode.
-      Segmentation App gains a segmentation source selector with three
-      modes (thresholding, external contours, Detectron2 preparation) and
-      hosts the preparation panel. The enhancement control sits above the
+      Segmentation App gains a segmentation source selector with four
+      modes (thresholding, external contours, Detectron2 preparation,
+      SAM 3) and hosts the panels for the last two. The enhancement
+      control sits above the
       source selector and applies in every mode, with its live preview; a
       caution appears beside it when enhancement is on in thresholding mode,
       because it shifts the brightness range the intensity thresholds were
       chosen against.
 
   src/idtrackerai/segmentation_app/widgets/frame_analyzer.py
-      New set_suspended(), so the blob overlay stands down in Detectron2
-      preparation mode where thresholding means nothing. With suspended
+      New set_suspended(), so the blob overlay stands down in the
+      Detectron2 and SAM 3 modes, where thresholding means nothing. With suspended
       False the behaviour is unchanged. It also segments the enhanced frame
       when an enhancement is set, so the blob outlines match the picture
       they are drawn on.
@@ -250,6 +258,40 @@ Files added:
   docs/detectron2-pipeline.md
       Documentation for the pipeline above.
 
+  src/idtrackerai/extra_tools/detectron2_pipeline/gpu.py
+      The capability probe also reports whether the sam3 package is present,
+      with sam3_usable and sam3_missing beside the existing usable and
+      missing. SAM 3 needs a CUDA GPU and its own package but not
+      Detectron2, so one notion of "usable" would refuse it on a machine
+      that can run it.
+
+  src/idtrackerai/extra_tools/detectron2_pipeline/sam3_predictor.py
+      SAM 3 behind the same predict(frame) -> (masks, scores) interface the
+      contour exporter uses for Detectron2. Prompts each frame independently
+      rather than using SAM 3's video tracking, because the sidecar carries
+      no identity and idtracker.ai resolves identity itself.
+
+  src/idtrackerai/extra_tools/detectron2_pipeline/prelabel.py
+      Drafts LabelMe annotations from SAM 3 for correction by hand. Never
+      overwrites an existing annotation.
+
+  src/idtrackerai/segmentation_app/widgets/sam3_panel.py
+      The SAM 3 mode of the Segmentation App: drafting annotations, and
+      exporting contours when a CUDA GPU is present.
+
+  tests/contours_export_test.py
+      Tests for the contour exporter, driven by a stand-in model so they
+      need no GPU.
+
+  tests/sam3_prelabel_test.py
+      Tests that drafted annotations build a COCO dataset unchanged.
+
+  tests/sam3_panel_test.py, tests/bundle_test.py
+      Tests for the SAM 3 panel's wiring and for the Colab bundle's layout.
+
+  docs/sam3-pipeline.md
+      Documentation for the SAM 3 route.
+
   VALIDATOR.md
       What this fork changes in the Validator, and why.
 
@@ -267,5 +309,28 @@ Each carries its own licence:
   PyTorch      BSD-3-Clause https://pytorch.org
   OpenCV       Apache-2.0   https://opencv.org
   LabelMe      GPL-3.0      https://github.com/wkentaro/labelme
+  SAM 3        SAM License  https://github.com/facebookresearch/sam3
+
+None of them is distributed with this software. Detectron2 and SAM 3 are
+both optional and are installed separately by whoever runs the GPU stages.
+
+The SAM 3 licence deserves a note. It is Meta's own "SAM License", not an
+OSI-approved licence, and it governs both the sam3 package and the sam3.pt
+weights. Its terms, including its acceptable use policy, are neither
+granted nor restricted by this project's GPL-3.0, and anyone using the
+SAM 3 route should read it. The ultralytics package can load the same
+weights and was not used, because it is AGPL-3.0.
 
 See CITATION.cff and README.md for the papers to cite.
+
+
+Acknowledgement
+---------------
+
+The SAM 3 route began as an independent implementation by Talha
+(github.com/laiquet) in idtrackerai-enhanced, which integrates SAM 3 and
+Detectron2 into idtracker.ai by a different route: running the models
+in-process during tracking rather than exporting contours beforehand. No
+code was copied. What was taken is the approach -- segmenting from a text
+prompt, and falling back on threshold-derived points to recover animals a
+text prompt misses -- and the demonstration that it was worth doing at all.

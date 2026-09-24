@@ -1,5 +1,5 @@
-"""Runs a fine-tuned Detectron2 instance-segmentation model over a video and
-writes the animals' outlines to a sidecar file for idtracker.ai.
+"""Runs an instance-segmentation model over a video and writes the animals'
+outlines to a sidecar file for idtracker.ai.
 
 This replaces the older "enhance the video, then let idtracker.ai re-threshold
 it" route. Nothing is painted back into pixels, so no per-clip intensity or area
@@ -10,11 +10,37 @@ Runs where the GPU is (Colab, a workstation) and produces one small .h5 per
 video. Tracking then happens wherever idtracker.ai lives; the two no longer have
 to be the same machine, and an enhanced video never has to be encoded or moved.
 
+Two models can do the segmenting, and they ask for opposite things:
+
+``--backend detectron2`` (default)
+    A Mask R-CNN fine-tuned on frames you annotated yourself. Costs a day of
+    annotation and a training run, and in exchange knows your species, your
+    tank and your lighting.
+
+``--backend sam3``
+    Meta's SAM 3, prompted with a word such as ``fish``. No annotation and no
+    training, but it is a general model that has never seen your setup, so it
+    is weaker exactly where thresholding is weak: low contrast and small,
+    similar animals. Also useful as a first pass to pre-label frames you then
+    correct and train on — see ``prelabel.py``.
+
+Whichever runs, the output is the same file in the same format, and everything
+after the masks — cleanup, overlap policy, polygons, the sidecar — is shared.
+
 Usage
 -----
     python detectron2_export_contours.py \\
         --video clip_01.mp4 \\
         --weights model_final.pth \\
+        --output clip_01_contours.h5 \\
+        --max-instances 5
+
+or, with no trained model of your own::
+
+    python detectron2_export_contours.py \\
+        --backend sam3 --prompt fish \\
+        --video clip_01.mp4 \\
+        --weights sam3.pt \\
         --output clip_01_contours.h5 \\
         --max-instances 5
 
@@ -212,36 +238,83 @@ def mask_to_contours(mask: np.ndarray, min_area: float) -> list[np.ndarray]:
     ]
 
 
-# ---------------------------------------------------------------------- main
+# ------------------------------------------------------------------ backends
+# A backend is anything with a ``predict`` method taking one BGR frame and
+# returning its instance masks and their scores:
+#
+#     predict(frame) -> (list[np.ndarray uint8 H*W], list[float])
+#
+# Everything after that point in this file — mask cleanup, deduplication, the
+# overlap policy, the polygons and the sidecar itself — is the same whichever
+# model produced the masks, and the sidecar format has never mentioned
+# Detectron2. Keeping the model behind this one small interface is what lets a
+# second one be added without touching the export loop.
+
+
+class Detectron2Predictor:
+    """A fine-tuned Mask R-CNN, trained on frames you annotated yourself."""
+
+    def __init__(self, args, metadata: dict | None):
+        from detectron2 import model_zoo  # type: ignore
+        from detectron2.config import get_cfg  # type: ignore
+        from detectron2.engine import DefaultPredictor  # type: ignore
+
+        # Class count and test scale must match training. Take them from the
+        # training record unless the user overrode them explicitly, because a
+        # mismatch here produces a model that loads cleanly and predicts nonsense.
+        num_classes = args.num_classes
+        if num_classes is None:
+            num_classes = (metadata or {}).get("num_classes", 1)
+        min_size = args.min_size
+        if min_size is None:
+            min_size = (metadata or {}).get("min_size_test", 640)
+        config = args.config or (metadata or {}).get(
+            "config", "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"
+        )
+
+        print(f"Model: {config}, {num_classes} class(es), test scale {min_size}")
+
+        cfg = get_cfg()
+        cfg.merge_from_file(model_zoo.get_config_file(config))
+        cfg.MODEL.WEIGHTS = str(args.weights)
+        cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_classes
+        cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.score_threshold
+        cfg.TEST.DETECTIONS_PER_IMAGE = args.max_instances
+        cfg.INPUT.MIN_SIZE_TEST = min_size
+        cfg.MODEL.DEVICE = args.device
+        self._predictor = DefaultPredictor(cfg)
+        self.description = config
+
+    def predict(self, frame: np.ndarray):
+        instances = self._predictor(frame)["instances"].to("cpu")
+        masks = list(instances.pred_masks.numpy().astype(np.uint8))
+        scores = [float(s) for s in instances.scores.numpy()]
+        return masks, scores
+
+
 def build_predictor(args, metadata: dict | None):
-    from detectron2 import model_zoo  # type: ignore
-    from detectron2.config import get_cfg  # type: ignore
-    from detectron2.engine import DefaultPredictor  # type: ignore
+    """Returns the backend named by ``--backend`` and a string describing it.
 
-    # Class count and test scale must match training. Take them from the
-    # training record unless the user overrode them explicitly, because a
-    # mismatch here produces a model that loads cleanly and predicts nonsense.
-    num_classes = args.num_classes
-    if num_classes is None:
-        num_classes = (metadata or {}).get("num_classes", 1)
-    min_size = args.min_size
-    if min_size is None:
-        min_size = (metadata or {}).get("min_size_test", 640)
-    config = args.config or (metadata or {}).get(
-        "config", "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"
-    )
+    The description is recorded in the sidecar so a contour file says which
+    model made it, which matters once two of them can.
+    """
+    if args.backend == "sam3":
+        try:
+            from .sam3_predictor import Sam3Predictor
+        except ImportError:  # loaded by path, e.g. from a Colab bundle
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from sam3_predictor import Sam3Predictor  # type: ignore[no-redef]
 
-    print(f"Model: {config}, {num_classes} class(es), test scale {min_size}")
-
-    cfg = get_cfg()
-    cfg.merge_from_file(model_zoo.get_config_file(config))
-    cfg.MODEL.WEIGHTS = str(args.weights)
-    cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_classes
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.score_threshold
-    cfg.TEST.DETECTIONS_PER_IMAGE = args.max_instances
-    cfg.INPUT.MIN_SIZE_TEST = min_size
-    cfg.MODEL.DEVICE = args.device
-    return DefaultPredictor(cfg), config
+        predictor = Sam3Predictor(
+            checkpoint=args.weights,
+            prompt=args.prompt,
+            device=args.device,
+            score_threshold=args.score_threshold,
+            max_instances=args.max_instances,
+        )
+    else:
+        predictor = Detectron2Predictor(args, metadata)
+    return predictor, predictor.description
 
 
 def export_video(
@@ -249,15 +322,24 @@ def export_video(
     output: Path,
     args,
     predictor,
-    config: str,
+    model_description: str,
     enhance,
     enhancement: dict,
     write_contours,
-) -> dict:
+    progress=None,
+    abort=None,
+) -> dict | None:
     """Runs the model over one video and writes its contour file.
 
     Returns a stats dict, which the batch runner records so a later session can
     report on work done in an earlier one.
+
+    ``progress(done, total)`` is called per frame, for a caller with a progress
+    bar to fill. ``abort()`` is polled per frame, following the convention in
+    ``sampling.py``; when it returns true this gives up and returns ``None``
+    **without writing anything**. A half-exported clip must not leave a file
+    behind, because the resume logic counts an existing file as a finished one
+    and would skip the rest of the video for good.
     """
     started = datetime.now(timezone.utc)
     local = video
@@ -293,6 +375,12 @@ def export_video(
     clock = time.monotonic()
 
     for frame_index in range(n_frames):
+        if abort is not None and abort():
+            cap.release()
+            if temporary_copy is not None and not args.keep_cache:
+                temporary_copy.unlink(missing_ok=True)
+            return None
+
         ok, frame = cap.read()
         if not ok:
             # Keep the frame slot so frame numbers stay aligned with the video.
@@ -301,11 +389,13 @@ def export_video(
             contours_per_frame.append([])
             scores_per_frame.append([])
             empty_frames += 1
+            # Report it here too: a run whose tail is unreadable would
+            # otherwise leave the bar short of the end, which reads as a hang.
+            if progress is not None:
+                progress(frame_index + 1, n_frames)
             continue
 
-        instances = predictor(enhance(frame))["instances"].to("cpu")
-        masks = [m for m in instances.pred_masks.numpy().astype(np.uint8)]
-        scores = [float(s) for s in instances.scores.numpy()]
+        masks, scores = predictor.predict(enhance(frame))
 
         masks = [clean_mask(m, args.min_component, kernel, args.dilate) for m in masks]
         keep = [i for i, m in enumerate(masks) if m.any()]
@@ -334,6 +424,9 @@ def export_video(
         elif len(frame_contours) < args.max_instances:
             short_frames += 1
 
+        if progress is not None:
+            progress(frame_index + 1, n_frames)
+
         if frame_index and frame_index % args.progress_every == 0:
             done = frame_index + 1
             rate = done / max(time.monotonic() - clock, 1e-6)
@@ -353,20 +446,28 @@ def export_video(
     # would count as a finished video.
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_suffix(output.suffix + ".partial")
+    # A contour file should say what made it, now that more than one thing can.
+    backend_provenance = {"backend": args.backend}
+    if args.backend == "sam3":
+        backend_provenance["prompt"] = args.prompt
+
     write_contours(
         partial,
         contours_per_frame,
         width=width,
         height=height,
         scores_per_frame=scores_per_frame,
-        source="detectron2_export_contours.py",
+        # This file is shipped to Colab under a different name, so read it off
+        # the file itself rather than hardcoding one of the two.
+        source=Path(__file__).name,
         video=video.name,
-        model=config,
+        model=model_description,
         weights=Path(args.weights).name,
         score_threshold=args.score_threshold,
         max_instances=args.max_instances,
         on_overlap=args.on_overlap,
         enhancement=json.dumps(enhancement),
+        **backend_provenance,
         postprocessing=json.dumps(
             {
                 "min_component": args.min_component,
@@ -429,6 +530,20 @@ def main():
     parser = argparse.ArgumentParser(
         description="Export Detectron2 instance contours for idtracker.ai",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("detectron2", "sam3"),
+        default="detectron2",
+        help=(
+            "detectron2: a Mask R-CNN fine-tuned on frames you annotated;"
+            " sam3: Meta's SAM 3 prompted with a word for the animal, which"
+            " needs no annotation or training but is not specific to your setup"
+        ),
+    )
+    parser.add_argument(
+        "--prompt",
+        help="with --backend sam3, the word describing the animal, e.g. 'fish'",
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--video", type=Path, help="a single video")
@@ -528,12 +643,33 @@ def main():
     if args.video and not args.output:
         parser.error("--video needs --output")
 
+    # Say so rather than ignoring them. A flag that looks accepted but does
+    # nothing is how someone ends up believing they set a class count on a
+    # model that has no classes.
+    detectron2_only = {
+        "--num-classes": args.num_classes,
+        "--min-size": args.min_size,
+        "--config": args.config,
+    }
+    if args.backend == "sam3":
+        if not args.prompt:
+            parser.error("--backend sam3 needs --prompt, e.g. --prompt fish")
+        used = [flag for flag, value in detectron2_only.items() if value is not None]
+        if used:
+            verb = "only applies" if len(used) == 1 else "only apply"
+            parser.error(f"{', '.join(used)} {verb} to --backend detectron2")
+    elif args.prompt:
+        parser.error("--prompt only applies to --backend sam3")
+
     videos = resolve_videos(args)
     if not videos:
         raise SystemExit("No videos matched")
 
     write_contours = load_writer()
-    metadata = load_training_metadata(args.weights)
+    # SAM 3 was never fine-tuned on this setup, so there is no training record
+    # to read and nothing to check the enhancement against. Looking for one
+    # would only produce a warning about a file that was never meant to exist.
+    metadata = load_training_metadata(args.weights) if args.backend == "detectron2" else None
     # Inference adopts whatever the model was trained with, unless the user
     # deliberately overrides it. Retyping the flags identically at inference
     # time was the old requirement, and an easy thing to get silently wrong.
@@ -546,15 +682,16 @@ def main():
     print(f"enhancement: {fp.describe(enhancement)}")
     enhance = fp.make_enhancer_from(enhancement)
 
-    if metadata is None:
-        print(
-            f"No training_metadata.json beside {args.weights}; cannot check"
-            " that inference matches how the model was trained."
-        )
-    else:
-        mismatch = fp.check_settings_match(trained_with, enhancement, "training")
-        if mismatch:
-            print(f"\nWARNING: {mismatch}\n")
+    if args.backend == "detectron2":
+        if metadata is None:
+            print(
+                f"No training_metadata.json beside {args.weights}; cannot check"
+                " that inference matches how the model was trained."
+            )
+        else:
+            mismatch = fp.check_settings_match(trained_with, enhancement, "training")
+            if mismatch:
+                print(f"\nWARNING: {mismatch}\n")
 
     def output_for(video: Path) -> Path:
         return args.output if args.output else args.output_dir / f"{video.stem}.h5"
@@ -569,7 +706,7 @@ def main():
         print("Nothing to do. Pass --overwrite to redo them.")
         return
 
-    predictor, config = build_predictor(args, metadata)
+    predictor, model_description = build_predictor(args, metadata)
 
     log_path = (args.output_dir or args.output.parent) / "export_log.json"
     log = []
@@ -587,13 +724,15 @@ def main():
                 output_for(video),
                 args,
                 predictor,
-                config,
+                model_description,
                 enhance,
                 enhancement,
                 write_contours,
             )
         except KeyboardInterrupt:
             print("\nInterrupted. Finished videos are kept; rerun to continue.")
+            break
+        if stats is None:  # only reachable with an abort callback, but cheap
             break
         log = [entry for entry in log if entry.get("video") != stats["video"]]
         log.append(stats)

@@ -7,6 +7,11 @@
 *.egg-info
 *.eggs
 
+# model weights: gigabytes each, and they belong beside the data
+# or in Drive, never in the repo
+*.pt
+*.pth
+
 # specific folders
 session_*
 .vscode

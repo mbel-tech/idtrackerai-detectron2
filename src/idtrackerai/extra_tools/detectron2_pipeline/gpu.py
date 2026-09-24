@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 # one place to look when it needs changing.
 PROBE = """
 import json
-report = {"torch": None, "detectron2": None, "cuda": False, "device": None,
-          "notes": []}
+report = {"torch": None, "detectron2": None, "sam3": None, "cuda": False,
+          "device": None, "notes": []}
 try:
     import torch
     report["torch"] = torch.__version__
@@ -40,6 +40,21 @@ try:
     report["detectron2"] = getattr(detectron2, "__version__", "unknown")
 except Exception:
     pass
+# Looked up rather than imported. Importing sam3 pulls in timm and a good
+# deal else, and this probe answers for Detectron2 too: a slow import here
+# would push the one subprocess past its timeout and report a machine that
+# can train as one that cannot. Presence is enough, because loading it for
+# real happens later and reports its own errors.
+try:
+    import importlib.metadata
+    import importlib.util
+    if importlib.util.find_spec("sam3") is not None:
+        try:
+            report["sam3"] = importlib.metadata.version("sam3")
+        except Exception:
+            report["sam3"] = "unknown"
+except Exception:
+    pass
 print(json.dumps(report))
 """
 
@@ -50,6 +65,7 @@ class GpuReport:
 
     torch_version: str | None = None
     detectron2_version: str | None = None
+    sam3_version: str | None = None
     cuda_available: bool = False
     device_name: str | None = None
     notes: list[str] = field(default_factory=list)
@@ -59,6 +75,28 @@ class GpuReport:
     def usable(self) -> bool:
         """True when training and export can run here."""
         return bool(self.cuda_available and self.detectron2_version)
+
+    @property
+    def sam3_usable(self) -> bool:
+        """True when SAM 3 can run here.
+
+        Deliberately not ``usable``: SAM 3 needs a CUDA GPU and its own
+        package, and does not need Detectron2 at all. Asking one question for
+        both backends would refuse SAM 3 on a machine that can run it.
+        """
+        return bool(self.cuda_available and self.sam3_version)
+
+    @property
+    def sam3_missing(self) -> list[str]:
+        """What stands between this machine and a SAM 3 run."""
+        gaps = []
+        if self.torch_version is None:
+            gaps.append("PyTorch is not installed")
+        elif not self.cuda_available:
+            gaps.append("PyTorch cannot see a CUDA GPU")
+        if self.sam3_version is None:
+            gaps.append("the sam3 package is not installed")
+        return gaps
 
     @property
     def missing(self) -> list[str]:
@@ -117,6 +155,7 @@ def describe_gpu(python: str | None = None, timeout: float = 60.0) -> GpuReport:
 
     report.torch_version = data.get("torch")
     report.detectron2_version = data.get("detectron2")
+    report.sam3_version = data.get("sam3")
     report.cuda_available = bool(data.get("cuda"))
     report.device_name = data.get("device")
     report.notes = list(data.get("notes") or [])
@@ -132,4 +171,15 @@ INSTALL_HINT = (
     "Detectron2 has no PyPI release and is built from source, which needs a "
     "compiler. If that is more than you want to take on, the Colab notebook "
     "does the same work on a hosted GPU."
+)
+
+
+SAM3_INSTALL_HINT = (
+    "To run SAM 3 here you need a CUDA GPU, PyTorch built for it, and Meta's "
+    "sam3 package.\n\n"
+    "  1. Install PyTorch for your CUDA version from pytorch.org\n"
+    "  2. pip install sam3\n\n"
+    "SAM 3 is a 3.4 GB model. Drafting a few hundred annotation frames on a "
+    "CPU is slow but workable; exporting a whole video is not, and the Colab "
+    "notebook does that on a hosted GPU instead."
 )

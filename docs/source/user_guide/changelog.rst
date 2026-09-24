@@ -30,7 +30,7 @@ idtrackerai-detectron2 (this fork)
 Changes made in `this fork <https://github.com/mbel-tech/idtrackerai-detectron2>`_
 and not present in upstream idtracker.ai. They are described at length in
 ``VALIDATOR.md`` and ``README.md`` in the repository root, and in
-``docs/detectron2-pipeline.md``.
+``docs/detectron2-pipeline.md`` and ``docs/sam3-pipeline.md``.
 
 Validator changes
 -----------------
@@ -68,6 +68,24 @@ Segmentation changes
   tracking part of a session when a clip has no file.
 - The Segmentation App gains a segmentation-source selector and a guided panel
   for sampling frames, annotating them and building a Detectron2 dataset.
+- SAM 3 can produce the contours instead of a trained Mask R-CNN, prompted with
+  a word for the animal rather than trained on annotated frames. It writes the
+  same sidecar files, so nothing downstream of segmentation distinguishes the
+  two, and the contour exporter now dispatches on ``--backend``. SAM 3 runs
+  through Meta's ``sam3`` package, which like ``detectron2`` is optional and not
+  declared as a dependency.
+- New ``idtrackerai_sam3_prelabel``: SAM 3 drafts LabelMe annotations over the
+  sampled frames so preparing a Detectron2 dataset becomes correcting outlines
+  rather than drawing them. It never overwrites an existing annotation, writes
+  no file for a frame it found nothing in, and simplifies outlines so they can
+  be edited by hand.
+- The Segmentation App gains a fourth segmentation source, ``SAM 3``, offering
+  both of those. Exporting a whole video is offered only where there is a CUDA
+  GPU, since on a CPU it is not slow but impractical; the Colab notebook covers
+  that case, in a new section 8.
+- ``export_video()`` takes ``progress`` and ``abort`` callbacks. An aborted
+  export writes nothing, because a partial sidecar would be counted as a
+  finished one by the resume logic.
 - The preparation panel keeps its own list of videos to draw annotation frames
   from, separate from the videos being tracked, so one model can be trained
   across every recording from a setup while each recording is tracked on its
