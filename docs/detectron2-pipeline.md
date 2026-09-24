@@ -13,9 +13,9 @@ thresholds to tune.
 ```
   LOCAL (the Segmentation App, or these scripts)
     1  enhancement        choose it against your own footage
-    2  sample frames      spread across the whole of every clip
+    2  sample frames      from every clip you list, across the whole of each
     3  annotate           LabelMe, one polygon per animal
-    4  build dataset      validate, convert, split train/val by video
+    4  build dataset      validate, convert, split train/val by recording
                     |
   COLAB (needs a GPU)
     5  train              fine-tune Mask R-CNN, record the settings used
