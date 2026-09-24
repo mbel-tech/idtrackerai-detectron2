@@ -38,6 +38,10 @@ little sense when the card is already in the machine.
 App pairs them by name, so the order is right by construction. Identities are
 then carried across the joins instead of restarting at each segment.
 
+> Step 3 is the slow one. [SAM 3](sam3-pipeline.md) can draft the outlines
+> first, so it becomes correcting rather than drawing. SAM 3 can also replace
+> steps 1–6 entirely, at the cost of a model that has never seen your setup.
+
 The enhancement settings chosen in step 1 travel all the way to step 6. That is
 the point of the profile file: the model must see the same kind of image at
 inference that it was annotated on, and training on CLAHE-enhanced frames while

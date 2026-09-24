@@ -5,8 +5,9 @@
 [![eLife](https://img.shields.io/badge/cite-10.7554%2FeLife.107602-blue)](https://doi.org/10.7554/eLife.107602)
 
 A fork of [idtracker.ai](https://idtracker.ai) that takes animal outlines from
-an external instance-segmentation model — a fine-tuned Detectron2 Mask R-CNN —
-instead of finding them by intensity thresholding.
+an external instance-segmentation model — a fine-tuned Detectron2 Mask R-CNN, or
+Meta's SAM 3 prompted with a word — instead of finding them by intensity
+thresholding.
 
 **Identity tracking is untouched.** Crossing detection, fragmentation, the
 identification network and gap closing are upstream idtracker.ai's, unmodified.
@@ -49,7 +50,8 @@ bounding box, extension and orientation *from the contour*. Supply a contour and
 every blob feature exists, computed by the same code as before.
 
 ```
-Detectron2 Mask R-CNN  ->  contours.h5  ->  idtracker.ai
+Detectron2 Mask R-CNN                          >  contours.h5  ->  idtracker.ai
+SAM 3 ("fish")         /
                                              |
                                              +- crossing detection   unmodified
                                              +- fragmentation        unmodified
@@ -61,6 +63,26 @@ When two animals genuinely overlap, the default (`--on-overlap merge`) hands
 idtracker.ai a single blob and lets its crossing machinery reconstruct who was
 who — the behaviour you already trust. The alternative, letting the detector
 split them, is available but shifts that judgement to Mask R-CNN.
+
+## Which model
+
+Two can produce the contours, and they ask for opposite things.
+
+**Detectron2** is fine-tuned on frames you outlined yourself. It costs a day of
+annotation and a training run, and in exchange it knows your species, your tank
+and your lighting. This is the one to use for results you will publish.
+
+**SAM 3** is prompted with a word such as `fish` and segments immediately, with
+no annotation and no training. It is a general model that has never seen your
+setup, so it is weakest exactly where thresholding is weak — low contrast, small
+animals that look alike. It earns its place in two ways: getting a clip tracked
+today, or for a recording you will never train a model for; and **drafting the
+annotations** for the Detectron2 route, which turns the slow part of preparing a
+dataset from drawing into correcting.
+
+They are not exclusive. Drafting with SAM 3 and then training Detectron2 on the
+corrected result is the fastest way to a model that is actually good on your
+footage.
 
 ## Using it
 
@@ -123,6 +145,38 @@ Every stage is also available as an installed command — `idtrackerai_d2_sample
 `idtrackerai_d2_dataset`, `idtrackerai_d2_train` and so on — for scripting or a
 headless machine. See **[docs/detectron2-pipeline.md](docs/detectron2-pipeline.md)**.
 
+### Segmenting with SAM 3
+
+Set **Segmentation → SAM 3**. The panel needs the checkpoint and a prompt, and
+then does either of two things.
+
+**Draft annotations** runs over the sampled frames and writes LabelMe files
+beside them, so annotating becomes correcting. Frames you have already annotated
+are never overwritten, and frames where SAM 3 found nothing get no file at all,
+so they stay visibly unfinished. Everything it draws is a draft: correct it
+before training on it.
+
+**Export contours** writes one sidecar per clip, the same format the Detectron2
+route produces, and switches the session onto them when it finishes.
+
+Both are also installed commands:
+
+```bash
+idtrackerai_sam3_prelabel --input-dir frames/ --weights sam3.pt --prompt fish
+idtrackerai_d2_export --backend sam3 --prompt fish     --videos 'clips/*.mp4' --weights sam3.pt --output-dir contours/
+```
+
+`sam3.pt` is gated: request access once at
+[`facebook/sam3`](https://huggingface.co/facebook/sam3) on Hugging Face. It is
+about 3.4 GB and never belongs in the repository.
+
+SAM 3 needs a CUDA GPU. Exporting a whole video on a CPU is not slow but
+impractical, so the app offers it only when there is one, and points at the
+Colab notebook otherwise — section 8 of the same notebook the Detectron2 stages
+use. Drafting a few hundred frames on a CPU is merely slow, and is offered.
+
+See **[docs/sam3-pipeline.md](docs/sam3-pipeline.md)**.
+
 ### Tracking with the result
 
 Point a session at the contour file, in the `.toml`:
@@ -177,6 +231,12 @@ Mask R-CNN:
 > *Proceedings of the IEEE International Conference on Computer Vision (ICCV)*.
 > https://doi.org/10.1109/ICCV.2017.322
 
+If you used the SAM 3 route, for segmentation or to draft annotations, cite it
+too:
+
+> Meta AI Research (2025). SAM 3: Segment Anything with Concepts.
+> https://github.com/facebookresearch/sam3
+
 [`CITATION.cff`](CITATION.cff) carries all of this in machine-readable form;
 GitHub's *Cite this repository* button reads it.
 
@@ -189,8 +249,22 @@ GPL-3.0-or-later, the same licence as upstream idtracker.ai. The original
 GPL-3.0 section 5(a) requires. The upstream README is preserved as
 [`README.idtrackerai.md`](README.idtrackerai.md).
 
+Detectron2 and SAM 3 are optional, installed separately, and not distributed
+here. **SAM 3 carries Meta's own SAM License**, which is not an OSI-approved
+licence and has its own terms including an acceptable use policy. It governs
+both the `sam3` package and the `sam3.pt` weights, it is unaffected by this
+project's GPL-3.0, and you should read it before publishing results that depend
+on it.
+
 ## Acknowledgements
 
 idtracker.ai is built by the de Polavieja Lab at the Champalimaud Foundation.
 This fork is a thin change to one stage of their pipeline; the science, and
 nearly all of the code, is theirs.
+
+The SAM 3 route began as an independent implementation by
+[Talha](https://github.com/laiquet) in
+[idtrackerai-enhanced](https://github.com/laiquet/idtrackerai-enhanced), which
+integrates SAM 3 and Detectron2 by a different route — running the models during
+tracking rather than exporting contours beforehand. No code was copied; the
+approach, and the demonstration that it was worth doing, came from there.

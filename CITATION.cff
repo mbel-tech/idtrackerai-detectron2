@@ -4,8 +4,9 @@ message: >-
   This repository is a modified version of idtracker.ai. The tracking
   method is the work of the de Polavieja Lab. If you use this software,
   please cite their paper (given under preferred-citation) first. Cite
-  this repository in addition only if the Detectron2 segmentation path
-  itself is relevant to what you are reporting.
+  this repository in addition only if the external segmentation path --
+  Detectron2 or SAM 3 -- is itself relevant to what you are reporting,
+  and cite Detectron2, Mask R-CNN or SAM 3 as well when you used them.
 type: software
 authors:
   - family-names: Bellio
@@ -14,15 +15,21 @@ repository-code: https://github.com/mbel-tech/idtrackerai-detectron2
 url: https://github.com/mbel-tech/idtrackerai-detectron2
 abstract: >-
   A fork of idtracker.ai that accepts animal outlines from an external
-  instance-segmentation model, such as a fine-tuned Detectron2 Mask
-  R-CNN, in place of its own intensity thresholding. Identity tracking
-  is unchanged: crossing detection, fragmentation, identification and
-  gap closing run exactly as in upstream idtracker.ai.
+  instance-segmentation model in place of its own intensity
+  thresholding: a fine-tuned Detectron2 Mask R-CNN, or Meta's SAM 3
+  prompted with a word for the animal. SAM 3 can also draft LabelMe
+  annotations for correction, as a way of preparing a Detectron2
+  dataset. Identity tracking is unchanged: crossing detection,
+  fragmentation, identification and gap closing run exactly as in
+  upstream idtracker.ai.
 keywords:
   - animal-tracking
   - instance-segmentation
   - detectron2
   - mask-rcnn
+  - sam3
+  - segment-anything
+  - foundation-models
   - idtracker.ai
   - behavioural-analysis
   - fish-tracking

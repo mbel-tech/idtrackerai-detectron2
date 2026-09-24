@@ -17,7 +17,7 @@ version = "6.0.15a0+detectron2.1"
 authors = [
     { name = "Martina Bellio" },
 ]
-description = "A fork of idtracker.ai that accepts animal outlines from an external instance-segmentation model, such as a fine-tuned Detectron2 Mask R-CNN, in place of intensity thresholding. Not affiliated with or endorsed by the de Polavieja Lab."
+description = "A fork of idtracker.ai that accepts animal outlines from an external instance-segmentation model -- a fine-tuned Detectron2 Mask R-CNN, or SAM 3 prompted with a word -- in place of intensity thresholding. Not affiliated with or endorsed by the de Polavieja Lab."
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
