@@ -49,8 +49,15 @@ import numpy as np
 try:
     from .inference import mask_to_contours
 except ImportError:  # loaded by path, e.g. from a Colab bundle
+    # The bundle unpacks the exporter under the name the notebook invokes,
+    # which is not the name of its module, so try both before giving up.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from inference import mask_to_contours  # type: ignore[no-redef]
+    try:
+        from inference import mask_to_contours  # type: ignore[no-redef]
+    except ImportError:
+        from detectron2_export_contours import (  # type: ignore[no-redef]
+            mask_to_contours,
+        )
 
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 

@@ -32,6 +32,12 @@ PIPELINE_FILES = [
     ("training.py", "tools/train_detectron2.py"),
     ("inference.py", "tools/detectron2_export_contours.py"),
     ("videos.py", "tools/check_videos.py"),
+    # SAM 3 needs a GPU as much as Detectron2 does, so both of its stages
+    # travel too: the backend the exporter loads for --backend sam3, and the
+    # pre-labelling step, which is only a local step on a machine that has a
+    # CUDA card to run it on.
+    ("sam3_predictor.py", "tools/sam3_predictor.py"),
+    ("prelabel.py", "tools/sam3_prelabel.py"),
     ("notebooks/colab_detectron2_pipeline.ipynb", "colab_detectron2_pipeline.ipynb"),
 ]
 
