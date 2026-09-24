@@ -84,6 +84,11 @@ Files changed relative to the fork point:
   src/idtrackerai/segmentation_app/main.py
   src/idtrackerai/segmentation_app/widgets/__init__.py
   src/idtrackerai/segmentation_app/tooltips.toml
+      The left column is inside a scroll area. A QVBoxLayout answers a
+      column that wants more height than the screen by compressing every
+      child below its natural size, which left a panel step too short to
+      show its own button; scrolling the column lets each widget be the
+      size it asked for, in every mode.
       Segmentation App gains a segmentation source selector with three
       modes (thresholding, external contours, Detectron2 preparation) and
       hosts the preparation panel. The enhancement control sits above the
@@ -215,7 +220,12 @@ Files added:
 
   src/idtrackerai/segmentation_app/widgets/detectron2_panel.py
   src/idtrackerai/segmentation_app/widgets/pipeline_threads.py
-      The guided preparation panel and its background workers. The panel
+      The guided preparation panel and its background workers. Six steps:
+      the four local ones, plus training, which runs here as a managed
+      subprocess when the machine has a CUDA GPU, and the contour export,
+      handed over as a command because it takes days over a collection.
+      Colab is the fallback for machines without a GPU rather than the
+      route. The panel
       keeps its own editable list of videos to draw annotation frames
       from, independent of the tracking session, so one model can be
       trained across every recording from a setup while each recording is

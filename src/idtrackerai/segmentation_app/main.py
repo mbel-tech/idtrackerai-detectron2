@@ -12,11 +12,13 @@ from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import (
     QCheckBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QVBoxLayout,
@@ -242,8 +244,22 @@ class SegmentationGUI(GUIBase):
         left = QWidget()
         left.setLayout(left_layout)
 
+        # The column asks for more height than a laptop screen has, and a
+        # QVBoxLayout answers that by compressing every child below its
+        # natural size: the Detectron2 panel was getting 248px for content
+        # needing 440, which pushed a step's own button behind a scrollbar
+        # inside the step. Scrolling the column instead lets each widget be
+        # the size it asked for, in every mode.
+        left_scroll = QScrollArea()
+        left_scroll.setWidget(left)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.addWidget(left)
+        main_splitter.addWidget(left_scroll)
         main_splitter.addWidget(self.videoPlayer)
         main_splitter.setSizes([400, 600])
         self.centralWidget().layout().addWidget(main_splitter)

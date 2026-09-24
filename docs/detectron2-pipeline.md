@@ -17,16 +17,26 @@ thresholds to tune.
     3  annotate           LabelMe, one polygon per animal
     4  build dataset      validate, convert, split train/val by recording
                     |
-  COLAB (needs a GPU)
+  NEEDS A CUDA GPU (this machine if it has one, otherwise Colab)
     5  train              fine-tune Mask R-CNN, record the settings used
-    6  export contours    run the model over each clip -> contours.h5
+    6  export contours    run the model over each clip -> one .h5 per clip
                     |
   LOCAL
-    7  track              external_contours = "contours/clip_01.h5"
+    7  track              external_contours = one .h5 per clip of the session
 ```
 
-Steps 1–4 are in the GUI. Steps 5–6 need a GPU and run in
-the Colab notebook, which `idtrackerai_d2_bundle` packages for you.
+Steps 1–4 are in the GUI and run anywhere. Steps 5–6 need a CUDA GPU: the panel
+checks whether this machine has one, runs training here when it does, and hands
+over the export as a command, since a collection takes days and that does not
+belong behind a window you cannot close. When there is no GPU,
+`idtrackerai_d2_bundle` packages the Colab notebook. Colab is the fallback, not
+the route — uploading tens of gigabytes of video to a hosted runtime makes
+little sense when the card is already in the machine.
+
+**A recording saved in several clips is tracked as one session.** Give
+`external_contours` one file per video path, in the same order; the Segmentation
+App pairs them by name, so the order is right by construction. Identities are
+then carried across the joins instead of restarting at each segment.
 
 The enhancement settings chosen in step 1 travel all the way to step 6. That is
 the point of the profile file: the model must see the same kind of image at

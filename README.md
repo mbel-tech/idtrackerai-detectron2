@@ -94,6 +94,11 @@ pipeline**. A guided panel walks through the four local stages:
    are folded together; the grouping it inferred is shown before you build, and
    can be overridden.
 
+Steps 5 and 6, training and contour export, need a CUDA GPU. The panel checks
+whether this machine has one and runs training here if it does; otherwise it
+says what is missing and points at the Colab notebook. The export is handed
+over as a command either way, because it takes days over a collection.
+
 You can close the app between steps; each one records what it produced, and
 status is re-derived from disk when you come back.
 

@@ -128,6 +128,30 @@ class FrameCountThread(QThread):
         self.counted.emit(counts)
 
 
+class GpuCheckThread(QThread):
+    """Asks whether this machine can run the GPU stages itself.
+
+    Off the GUI thread because the check starts a subprocess that imports
+    torch, which takes seconds when torch is installed.
+    """
+
+    reported = Signal(object)  # GpuReport
+
+    def __init__(self):
+        super().__init__()
+        self.report = None
+        self.abort = False
+
+    def quit(self):
+        self.abort = True
+
+    def run(self):
+        from idtrackerai.extra_tools.detectron2_pipeline import gpu
+
+        self.report = gpu.describe_gpu()
+        self.reported.emit(self.report)
+
+
 class DatasetThread(QThread):
     """Validates annotations and builds the COCO dataset."""
 

@@ -85,6 +85,17 @@ Segmentation changes
   across them, and a single unreadable file aborting a whole sampling run.
   Clips whose file names would collide are now refused before anything is
   written.
+- Training and contour export are steps in the Segmentation App, not only
+  instructions to go elsewhere. The panel checks whether this machine has a
+  CUDA GPU and Detectron2; when it does, training runs here as a managed
+  subprocess with its output shown and a stop button, without importing
+  Detectron2 into the GUI process. The export is handed over as a command,
+  because roughly an hour per 30 000-frame clip means days over a collection.
+  Colab is now the fallback for machines without a GPU rather than the route.
+- The Segmentation App's left column scrolls. It asks for more height than a
+  laptop screen has, and the layout answered that by shrinking every widget
+  below its natural size, which left a preparation step too short to show its
+  own button.
 - Fixed the Colab notebook aborting on every freshly built bundle: its
   integrity check looked for ``tools/frame_preprocessing.py``, a name the
   bundle has never written. Repaired its markdown cells, whose stored lines

@@ -1,9 +1,14 @@
 """The guided panel for preparing a Detectron2 model.
 
-Four local steps: choose the enhancement, sample frames, annotate them, build
-the dataset. Training and inference are deliberately absent — they need a GPU
-and are driven from the Colab notebook — so the panel ends by saying what to
-take there.
+Six steps: choose the enhancement, sample frames, annotate them, build the
+dataset, train, export contours. The first four run anywhere. The last two
+need a CUDA GPU, and the panel checks whether this machine has one rather than
+assuming it does not: Colab is the fallback, not the route.
+
+Training runs here as a managed subprocess, so its output is visible and it
+can be stopped, without importing detectron2 into the GUI process. The export
+is handed over as a command instead, because it takes days over a collection
+and that does not belong behind a window the user cannot close.
 
 Each step records what it produced, so the app can be closed in the middle of
 a job that takes days. Status is re-derived from disk on every load rather than
@@ -25,6 +30,7 @@ from qtpy.QtCore import (  # type: ignore[reportPrivateImportUsage]
 from qtpy.QtGui import QDesktopServices
 from qtpy.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -49,13 +55,19 @@ from qtpy.QtWidgets import (
 )
 
 from idtrackerai.extra_tools.detectron2_pipeline import dataset as dataset_mod
+from idtrackerai.extra_tools.detectron2_pipeline import gpu as gpu_mod
 from idtrackerai.extra_tools.detectron2_pipeline import prep_state as prep_state_mod
 from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
 from idtrackerai.extra_tools.detectron2_pipeline import sampling as sampling_mod
 from idtrackerai.GUI_tools import WrappedLabel
 
 from .enhancement_widget import EnhancementWidget
-from .pipeline_threads import DatasetThread, FrameCountThread, SamplingThread
+from .pipeline_threads import (
+    DatasetThread,
+    FrameCountThread,
+    GpuCheckThread,
+    SamplingThread,
+)
 
 
 class Detectron2Panel(QWidget):
@@ -90,28 +102,51 @@ class Detectron2Panel(QWidget):
         self._preview_timer.setInterval(200)
         self._preview_timer.timeout.connect(self.update_preview)
 
+        self.gpu = gpu_mod.GpuReport()
+        self.gpu_thread = GpuCheckThread()
+        self.gpu_thread.reported.connect(self._gpu_reported)
+        self.train_process: QProcess | None = None
+
         self.steps = QToolBox()
         self.steps.addItem(self._enhancement_page(), "1. Enhancement")
         self.steps.addItem(self._sampling_page(), "2. Sample frames")
         self.steps.addItem(self._annotate_page(), "3. Annotate")
         self.steps.addItem(self._dataset_page(), "4. Build dataset")
+        self.steps.addItem(self._train_page(), "5. Train")
+        self.steps.addItem(self._export_page(), "6. Export contours")
 
-        self.handoff = WrappedLabel()
-        self.handoff.setText(
-            "Training and inference need a GPU: upload the dataset and your "
-            "videos to Drive and run the Colab notebook, then come back and "
-            "choose 'External contours'."
-        )
-
+        # No standing hand-off paragraph any more. It said "the GPU stages
+        # happen on Colab", which steps 5 and 6 now say for themselves and
+        # with live information; keeping it cost two lines of height that the
+        # sampling step needs for its own button.
         layout = QVBoxLayout()
         self.setLayout(layout)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.steps)
-        layout.addWidget(self.handoff)
 
         self._wire_threads()
+        self.steps.currentChanged.connect(lambda _i: self._fit_to_open_step())
         self.enhancement.profileSaved.connect(self._profile_saved)
         self.enhancement_committed(self.enhancement.settings())
+        self._update_export_command()
+        self._fit_to_open_step()
+        self.check_gpu()
+
+    def _fit_to_open_step(self) -> None:
+        """Ask for the height the open step actually needs.
+
+        QToolBox reports the same modest sizeHint whatever it holds, so the
+        layout happily gave the panel 248px for a step needing 280 and the
+        step then scrolled internally -- hiding its own button. The left
+        column scrolls, so asking for the real height costs nothing worse
+        than a scrollbar on the column.
+        """
+        page = self.steps.currentWidget()
+        if page is None:
+            return
+        # one header per step, plus what the open one needs
+        headers = 34 * self.steps.count()
+        self.steps.setMinimumHeight(headers + page.sizeHint().height() + 8)
 
     # ------------------------------------------------------------------ pages
     def _enhancement_page(self) -> QWidget:
@@ -412,6 +447,138 @@ class Detectron2Panel(QWidget):
             text += " At least two groups are needed to split on them."
         self.grouping_status.setText(text)
 
+    # -------------------------------------------------------- steps 5 and 6
+    def _train_page(self) -> QWidget:
+        """Training, run here when this machine can, on Colab when it cannot.
+
+        Colab exists because most people tracking animals have no CUDA card,
+        not because the work has to leave the machine. When the card is there,
+        uploading tens of gigabytes of video to a hosted runtime to answer a
+        question this computer could answer is the wrong default.
+        """
+        page = QWidget()
+        self.gpu_status = WrappedLabel(framed=True)
+        self.gpu_status.setText(self.gpu.summary())
+
+        self.epochs = QSpinBox()
+        self.epochs.setRange(1, 10000)
+        self.epochs.setValue(40)
+        self.model_dir = QLineEdit()
+        self.model_dir.setReadOnly(True)
+        self.model_dir.setPlaceholderText("chosen when you run this step")
+        browse = QPushButton("Choose folder...")
+        browse.clicked.connect(self._choose_model_dir)
+
+        self.train_button = QPushButton("Train here")
+        self.train_button.clicked.connect(self.run_training)
+        self.train_button.setEnabled(False)
+        self.stop_train_button = QPushButton("Stop")
+        self.stop_train_button.clicked.connect(self.stop_training)
+        self.stop_train_button.setEnabled(False)
+        self.recheck_button = QPushButton("Check again")
+        self.recheck_button.clicked.connect(self.check_gpu)
+
+        self.train_log = QPlainTextEdit()
+        self.train_log.setReadOnly(True)
+        self.train_log.setMaximumHeight(110)
+        self.train_log.setPlaceholderText("training output appears here")
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow("Epochs", self.epochs)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.model_dir)
+        row.addWidget(browse)
+        holder = QWidget()
+        holder.setLayout(row)
+        form.addRow("Model folder", holder)
+
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.addWidget(self.train_button)
+        buttons.addWidget(self.stop_train_button)
+        buttons.addWidget(self.recheck_button)
+
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+        layout.addWidget(self.gpu_status)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+        layout.addWidget(self.train_log)
+        return page
+
+    def _export_page(self) -> QWidget:
+        """The export is handed over rather than run here.
+
+        One clip of 30 000 frames takes about an hour; a collection takes
+        days. That does not belong behind a window the user cannot close, so
+        the app builds the command and they run it where they like. It is
+        resumable, so it can be stopped and restarted as often as needed.
+        """
+        page = QWidget()
+        self.export_status = WrappedLabel()
+        self.export_command = QPlainTextEdit()
+        self.export_command.setReadOnly(True)
+        self.export_command.setMaximumHeight(96)
+        self.copy_command_button = QPushButton("Copy command")
+        self.copy_command_button.clicked.connect(self.copy_export_command)
+        self.contours_dir = QLineEdit()
+        self.contours_dir.setReadOnly(True)
+        contours_browse = QPushButton("Choose folder...")
+        contours_browse.clicked.connect(self._choose_contours_dir)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.contours_dir)
+        row.addWidget(contours_browse)
+        holder = QWidget()
+        holder.setLayout(row)
+        form.addRow("Contours folder", holder)
+
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+        layout.addWidget(self.export_status)
+        layout.addLayout(form)
+        layout.addWidget(self.export_command)
+        layout.addWidget(self.copy_command_button)
+        return page
+
+    # ----------------------------------------------------- GPU capability
+    def check_gpu(self) -> None:
+        if self.gpu_thread.isRunning():
+            return
+        self.gpu = gpu_mod.GpuReport()  # unchecked: shows "Checking..."
+        self.gpu_status.setText(self.gpu.summary())
+        self.recheck_button.setEnabled(False)
+        self.gpu_thread.start()
+
+    def _gpu_reported(self, report) -> None:
+        self.gpu = report
+        self.recheck_button.setEnabled(True)
+        text = report.summary()
+        if not report.usable:
+            text += "\n\n" + gpu_mod.INSTALL_HINT
+        self.gpu_status.setText(text)
+        self._refresh_gpu_steps()
+
+    def _refresh_gpu_steps(self) -> None:
+        usable = self.gpu.usable
+        running = self.train_process is not None
+        self.train_button.setEnabled(
+            usable and not running and bool(self.state and self.state.dataset_path)
+        )
+        self.stop_train_button.setEnabled(running)
+        mark = "" if self.gpu.checked else " - checking"
+        if self.gpu.checked and not usable:
+            mark = " - needs Colab"
+        self.steps.setItemText(4, f"5. Train{mark}")
+        self._update_export_command()
+
     # ----------------------------------------------------------------- context
     def set_video_context(self, video_paths, output_dir=None) -> None:
         """Called when a video is loaded; finds and reloads any prior work."""
@@ -495,6 +662,7 @@ class Detectron2Panel(QWidget):
         else:
             self.steps.setItemText(3, "4. Build dataset")
 
+        self._refresh_gpu_steps()
         self.launch_button.setEnabled(bool(s.frames_path and s.n_sampled))
         self.open_folder_button.setEnabled(bool(s.frames_path and s.frames_path.is_dir()))
         self.build_button.setEnabled(s.annotated > 0)
@@ -918,6 +1086,132 @@ class Detectron2Panel(QWidget):
             lines += [f"  {n}" for n in report.notes[:20]]
         return "\n".join(lines)
 
+    # ------------------------------------------------------------- step 5 run
+    def _choose_model_dir(self) -> None:
+        name = QFileDialog.getExistingDirectory(
+            self, "Folder for the trained model", self.model_dir.text()
+        )
+        if name:
+            self.model_dir.setText(name)
+            self._update_export_command()
+
+    def _choose_contours_dir(self) -> None:
+        name = QFileDialog.getExistingDirectory(
+            self, "Folder for the exported contours", self.contours_dir.text()
+        )
+        if name:
+            self.contours_dir.setText(name)
+            self._update_export_command()
+
+    @staticmethod
+    def _script(name: str) -> Path:
+        """A pipeline script's path, run through this interpreter.
+
+        Called by path rather than by console-script name, because the scripts
+        are installed but their directory is often not on PATH on Windows, and
+        never is inside a venv that was not activated.
+        """
+        return Path(gpu_mod.__file__).with_name(name)
+
+    def run_training(self) -> None:
+        dataset = self.state.dataset_path if self.state else None
+        if dataset is None or not (dataset / "train.json").is_file():
+            QMessageBox.warning(
+                self, "No dataset", "Build the dataset in step 4 first."
+            )
+            return
+        if not self.model_dir.text():
+            QMessageBox.warning(
+                self, "No model folder", "Choose where the weights should go."
+            )
+            return
+
+        arguments = [
+            str(self._script("training.py")),
+            "--dataset", str(dataset),
+            "--output", self.model_dir.text(),
+            "--epochs", str(self.epochs.value()),
+        ]
+        process = QProcess(self)
+        process.setProgram(sys.executable)
+        process.setArguments(arguments)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        process.readyReadStandardOutput.connect(self._training_output)
+        process.finished.connect(self._training_finished)
+        process.errorOccurred.connect(self._training_error)
+
+        self.train_log.setPlainText(
+            "$ " + sys.executable + " " + " ".join(arguments) + "\n"
+        )
+        self.train_process = process
+        self._refresh_gpu_steps()
+        process.start()
+
+    def _training_output(self) -> None:
+        if self.train_process is None:
+            return
+        chunk = bytes(self.train_process.readAllStandardOutput()).decode(
+            "utf-8", "replace"
+        )
+        self.train_log.appendPlainText(chunk.rstrip())
+
+    def _training_error(self, error) -> None:
+        self.train_log.appendPlainText(f"\nCould not run training: {error}")
+
+    def _training_finished(self, code: int, _status) -> None:
+        self.train_process = None
+        self._refresh_gpu_steps()
+        if code == 0:
+            self.train_log.appendPlainText("\nTraining finished.")
+            self.steps.setItemText(4, "5. Train - done")
+            self.steps.setCurrentIndex(5)
+        else:
+            self.train_log.appendPlainText(f"\nTraining stopped (exit code {code}).")
+
+    def stop_training(self) -> None:
+        if self.train_process is None:
+            return
+        self.train_log.appendPlainText("\nStopping...")
+        self.train_process.kill()
+
+    # ------------------------------------------------------------- step 6 run
+    def _update_export_command(self) -> None:
+        videos = self.video_paths
+        model = self.model_dir.text() or "<model folder>"
+        contours = self.contours_dir.text() or "<contours folder>"
+        pattern = (
+            str(videos[0].parent / "*.mp4") if videos else "<folder>/*.mp4"
+        )
+        command = (
+            f'"{sys.executable}" "{self._script("inference.py")}"'
+            f' --videos "{pattern}"'
+            f' --weights "{Path(model) / "model_final.pth"}"'
+            f' --output-dir "{contours}"'
+        )
+        self.export_command.setPlainText(command)
+
+        where = (
+            "This machine can run it."
+            if self.gpu.usable
+            else "This machine cannot run it; the Colab notebook can."
+        )
+        self.export_status.setText(
+            "Running the model over every frame takes roughly an hour per "
+            "30 000-frame clip, so a collection takes days. It is not run from "
+            "here: copy the command and run it in a terminal you can leave "
+            "open. It writes one file per clip and skips clips it has already "
+            f"done, so it can be stopped and restarted freely. {where}"
+        )
+
+    def copy_export_command(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self.export_command.toPlainText())
+            self.copy_command_button.setText("Copied")
+            QTimer.singleShot(
+                1500, lambda: self.copy_command_button.setText("Copy command")
+            )
+
     # ---------------------------------------------------------------- threads
     def _wire_threads(self) -> None:
         for thread, finished in (
@@ -983,6 +1277,17 @@ class Detectron2Panel(QWidget):
             (self.grouping_status, "d2_group_by"),
             (self.dataset_dir, "d2_dataset_folder"),
             (self.build_button, "d2_build"),
+            (self.gpu_status, "d2_gpu"),
+            (self.epochs, "d2_epochs"),
+            (self.model_dir, "d2_model_folder"),
+            (self.train_button, "d2_train"),
+            (self.stop_train_button, "d2_train"),
+            (self.recheck_button, "d2_gpu"),
+            (self.train_log, "d2_train"),
+            (self.contours_dir, "d2_contours_folder"),
+            (self.export_command, "d2_export"),
+            (self.copy_command_button, "d2_export"),
+            (self.export_status, "d2_export"),
             (self.enhancement_status, "enhancement"),
         ]
         for widget, key in pairs:
@@ -993,7 +1298,12 @@ class Detectron2Panel(QWidget):
     # ----------------------------------------------------------------- closing
     def close(self) -> bool:
         """Stops any running work and flushes the state before the app exits."""
-        for thread in (self.sampling_thread, self.dataset_thread, self.count_thread):
+        if self.train_process is not None:
+            self.train_process.kill()
+            self.train_process.waitForFinished(3000)
+            self.train_process = None
+        for thread in (self.sampling_thread, self.dataset_thread,
+                       self.count_thread, self.gpu_thread):
             if thread.isRunning():
                 thread.quit()
                 thread.wait(5000)
