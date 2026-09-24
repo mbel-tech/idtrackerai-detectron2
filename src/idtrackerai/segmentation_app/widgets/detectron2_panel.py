@@ -1250,20 +1250,62 @@ class Detectron2Panel(QWidget):
         self.train_process.kill()
 
     # ------------------------------------------------------------- step 6 run
+    VIDEO_SUFFIXES = (".mp4", ".avi", ".mov", ".mkv", ".mpg", ".mpeg", ".wmv", ".m4v")
+
+    def _export_target(self, videos) -> tuple[str, str]:
+        """The ``--videos`` argument, and a phrase describing what it covers.
+
+        A glob is used only when it means exactly this list: one folder, and
+        every video in it. Anything else is listed clip by clip, because a
+        command that quietly exports the wrong set is worse than a long one.
+        """
+        if not videos:
+            return '"<folder>/*.mp4"', "no videos listed yet"
+
+        parents = {video.parent for video in videos}
+        if len(parents) == 1:
+            folder = parents.pop()
+            suffix = videos[0].suffix.lower()
+            same_suffix = all(v.suffix.lower() == suffix for v in videos)
+            try:
+                on_disk = {
+                    p for p in folder.iterdir()
+                    if p.suffix.lower() in self.VIDEO_SUFFIXES
+                    and not sampling_mod._is_sidecar(p)
+                }
+            except OSError:
+                on_disk = set()
+            if same_suffix and on_disk and on_disk == set(videos):
+                return (
+                    f'"{folder / ("*" + suffix)}"',
+                    f"every {suffix} file in {folder.name}",
+                )
+
+        listed = " ".join(f'"{video}"' for video in videos)
+        where = (
+            "across several folders" if len(parents) > 1
+            else "a subset of that folder"
+        )
+        return listed, f"the {len(videos)} clips listed above, {where}"
+
     def _update_export_command(self) -> None:
         videos = self.video_paths
         model = self.model_dir.text() or "<model folder>"
         contours = self.contours_dir.text() or "<contours folder>"
-        pattern = (
-            str(videos[0].parent / "*.mp4") if videos else "<folder>/*.mp4"
-        )
+
+        # A glob of the first clip's folder is only right when the list IS
+        # that folder. On a curated list it exports clips that were removed,
+        # and on a list spanning folders it silently leaves whole folders out
+        # -- which would surface a day and a half into an export.
+        target, scope = self._export_target(videos)
         command = (
             f'"{sys.executable}" "{self._script("inference.py")}"'
-            f' --videos "{pattern}"'
+            f' --videos {target}'
             f' --weights "{Path(model) / "model_final.pth"}"'
             f' --output-dir "{contours}"'
         )
         self.export_command.setPlainText(command)
+        self._export_scope = scope
 
         where = (
             "This machine can run it."
@@ -1271,11 +1313,12 @@ class Detectron2Panel(QWidget):
             else "This machine cannot run it; the Colab notebook can."
         )
         self.export_status.setText(
-            "Running the model over every frame takes roughly an hour per "
-            "30 000-frame clip, so a collection takes days. It is not run from "
-            "here: copy the command and run it in a terminal you can leave "
-            "open. It writes one file per clip and skips clips it has already "
-            f"done, so it can be stopped and restarted freely. {where}"
+            f"This exports {scope}. Running the model over every frame takes "
+            "roughly an hour per 30 000-frame clip, so a collection takes "
+            "days. It is not run from here: copy the command and run it in a "
+            "terminal you can leave open. It writes one file per clip and "
+            "skips clips it has already done, so it can be stopped and "
+            f"restarted freely. {where}"
         )
 
     def copy_export_command(self) -> None:
