@@ -1,5 +1,6 @@
 """Chooses where the animals' outlines come from: idtracker.ai's own
-thresholding, or contours precomputed by an external segmentation model.
+thresholding, or contours from an external segmentation model -- loaded from a
+file, prepared with the Detectron2 pipeline, or produced here by SAM 3.
 """
 
 import logging
@@ -23,6 +24,7 @@ from idtrackerai.GUI_tools import WrappedLabel
 THRESHOLDING = "Thresholding"
 EXTERNAL = "External contours"
 DETECTRON2 = "Detectron2 pipeline"
+SAM3 = "SAM 3"
 
 
 class SegmentationSourceWidget(QWidget):
@@ -47,7 +49,7 @@ class SegmentationSourceWidget(QWidget):
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.source = QComboBox()
-        self.source.addItems((THRESHOLDING, EXTERNAL, DETECTRON2))
+        self.source.addItems((THRESHOLDING, EXTERNAL, DETECTRON2, SAM3))
         self.source.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.source.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum
@@ -107,10 +109,12 @@ class SegmentationSourceWidget(QWidget):
         self.browse.setVisible(external)
         self.modeChanged.emit(text)
 
-        if text == DETECTRON2:
-            # Preparing a model, not tracking with one. There is no contour
-            # file yet, so this must not open a file dialog the way EXTERNAL
-            # does; the panel below takes over.
+        if text in (DETECTRON2, SAM3):
+            # Preparing or running a model, not tracking with one yet. There is
+            # no contour file at this point, so this must not open a file
+            # dialog the way EXTERNAL does; the panel below takes over. When
+            # SAM 3 finishes an export it hands the files back through
+            # accept_paths, which switches the mode itself.
             self.valueChanged.emit(None)
             return
 
@@ -186,6 +190,16 @@ class SegmentationSourceWidget(QWidget):
             else:
                 missing.append(video)
         return matched, missing
+
+    def accept_paths(self, paths) -> bool:
+        """Takes contour files produced in-app, as if they had been browsed to.
+
+        The SAM 3 panel calls this when an export finishes: the files go
+        through the same validation as a hand-picked one, and the mode switches
+        to External contours, because from here on there is no difference
+        between contours this app made and contours it was given.
+        """
+        return self._accept([Path(p) for p in paths])
 
     def _accept(self, paths: list[Path]) -> bool:
         problem = self.describe_or_reject(paths)

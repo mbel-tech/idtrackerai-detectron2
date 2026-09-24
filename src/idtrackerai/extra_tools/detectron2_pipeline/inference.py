@@ -326,11 +326,20 @@ def export_video(
     enhance,
     enhancement: dict,
     write_contours,
-) -> dict:
+    progress=None,
+    abort=None,
+) -> dict | None:
     """Runs the model over one video and writes its contour file.
 
     Returns a stats dict, which the batch runner records so a later session can
     report on work done in an earlier one.
+
+    ``progress(done, total)`` is called per frame, for a caller with a progress
+    bar to fill. ``abort()`` is polled per frame, following the convention in
+    ``sampling.py``; when it returns true this gives up and returns ``None``
+    **without writing anything**. A half-exported clip must not leave a file
+    behind, because the resume logic counts an existing file as a finished one
+    and would skip the rest of the video for good.
     """
     started = datetime.now(timezone.utc)
     local = video
@@ -366,6 +375,12 @@ def export_video(
     clock = time.monotonic()
 
     for frame_index in range(n_frames):
+        if abort is not None and abort():
+            cap.release()
+            if temporary_copy is not None and not args.keep_cache:
+                temporary_copy.unlink(missing_ok=True)
+            return None
+
         ok, frame = cap.read()
         if not ok:
             # Keep the frame slot so frame numbers stay aligned with the video.
@@ -404,6 +419,9 @@ def export_video(
             empty_frames += 1
         elif len(frame_contours) < args.max_instances:
             short_frames += 1
+
+        if progress is not None:
+            progress(frame_index + 1, n_frames)
 
         if frame_index and frame_index % args.progress_every == 0:
             done = frame_index + 1
@@ -709,6 +727,8 @@ def main():
             )
         except KeyboardInterrupt:
             print("\nInterrupted. Finished videos are kept; rerun to continue.")
+            break
+        if stats is None:  # only reachable with an abort callback, but cheap
             break
         log = [entry for entry in log if entry.get("video") != stats["video"]]
         log.append(stats)
