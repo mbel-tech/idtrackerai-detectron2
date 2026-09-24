@@ -119,6 +119,11 @@ idtrackerai_d2_train = "idtrackerai.extra_tools.detectron2_pipeline.training:mai
 idtrackerai_d2_export = "idtrackerai.extra_tools.detectron2_pipeline.inference:main"
 idtrackerai_d2_videos = "idtrackerai.extra_tools.detectron2_pipeline.videos:main"
 idtrackerai_d2_bundle = "idtrackerai.extra_tools.detectron2_pipeline.bundle:main"
+# PyTorch and Detectron2 cannot be ordinary dependencies: PyPI's torch wheel
+# for Windows is CPU-only, so declaring it would silently disable the GPU for
+# idtracker.ai's own identity tracking, and Detectron2 is not on PyPI at all
+# and builds from source. This command installs the right ones for a machine.
+idtrackerai_d2_install_gpu = "idtrackerai.extra_tools.detectron2_pipeline.install_gpu:main"
 
 [tool.pytest.ini_options]
 log_file_format = "%(asctime)s %(levelname)8s %(message)s (%(filename)s:%(lineno)s)"

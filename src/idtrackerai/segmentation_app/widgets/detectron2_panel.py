@@ -56,6 +56,7 @@ from qtpy.QtWidgets import (
 
 from idtrackerai.extra_tools.detectron2_pipeline import dataset as dataset_mod
 from idtrackerai.extra_tools.detectron2_pipeline import gpu as gpu_mod
+from idtrackerai.extra_tools.detectron2_pipeline import install_gpu as install_mod
 from idtrackerai.extra_tools.detectron2_pipeline import prep_state as prep_state_mod
 from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
 from idtrackerai.extra_tools.detectron2_pipeline import sampling as sampling_mod
@@ -477,6 +478,9 @@ class Detectron2Panel(QWidget):
         self.stop_train_button.setEnabled(False)
         self.recheck_button = QPushButton("Check again")
         self.recheck_button.clicked.connect(self.check_gpu)
+        self.install_button = QPushButton("Install what is missing")
+        self.install_button.clicked.connect(self.install_gpu_stack)
+        self.install_button.setVisible(False)
 
         self.train_log = QPlainTextEdit()
         self.train_log.setReadOnly(True)
@@ -498,6 +502,7 @@ class Detectron2Panel(QWidget):
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.addWidget(self.train_button)
         buttons.addWidget(self.stop_train_button)
+        buttons.addWidget(self.install_button)
         buttons.addWidget(self.recheck_button)
 
         layout = QVBoxLayout(page)
@@ -573,6 +578,9 @@ class Detectron2Panel(QWidget):
             usable and not running and bool(self.state and self.state.dataset_path)
         )
         self.stop_train_button.setEnabled(running)
+        # offered only when there is something to install and nothing running
+        self.install_button.setVisible(self.gpu.checked and not usable)
+        self.install_button.setEnabled(not running)
         mark = "" if self.gpu.checked else " - checking"
         if self.gpu.checked and not usable:
             mark = " - needs Colab"
@@ -1086,6 +1094,73 @@ class Detectron2Panel(QWidget):
             lines += [f"  {n}" for n in report.notes[:20]]
         return "\n".join(lines)
 
+    def install_gpu_stack(self) -> None:
+        """Install PyTorch and Detectron2 for this machine, after showing how.
+
+        Neither can be an ordinary dependency: PyPI's torch wheel for Windows
+        is CPU-only, so declaring it would quietly stop idtracker.ai's own
+        identity tracking using the GPU, and Detectron2 is not on PyPI at all
+        and builds from source. So it is offered here, where the person has
+        just been told something is missing, rather than left to the docs.
+
+        The plan is shown first. This downloads gigabytes and compiles C++;
+        nobody should discover that from a progress bar.
+        """
+        if self.train_process is not None:
+            QMessageBox.information(
+                self, "Busy", "Wait for the current run to finish first."
+            )
+            return
+
+        # check_index=False keeps this instant: picking the CUDA index makes a
+        # network request, and the run itself does that properly.
+        plan = install_mod.make_plan(check_index=False)
+        answer = QMessageBox.question(
+            self,
+            "Install PyTorch and Detectron2?",
+            plan.as_text()
+            + "\n\nThis downloads several gigabytes and compiles C++; it can "
+            "take a long while. The exact CUDA version is confirmed when it "
+            "runs.\n\nGo ahead?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        arguments = [
+            "-m", "idtrackerai.extra_tools.detectron2_pipeline.install_gpu",
+            "--yes",
+        ]
+        process = QProcess(self)
+        process.setProgram(sys.executable)
+        process.setArguments(arguments)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        process.readyReadStandardOutput.connect(self._training_output)
+        process.finished.connect(self._install_finished)
+        process.errorOccurred.connect(self._training_error)
+
+        self.steps.setCurrentIndex(4)
+        self.train_log.setPlainText("Installing. This will take a while.\n")
+        self.train_process = process
+        self._refresh_gpu_steps()
+        process.start()
+
+    def _install_finished(self, code: int, _status) -> None:
+        self.train_process = None
+        if code == 0:
+            self.train_log.appendPlainText(
+                "\nInstall finished. Checking what it can do..."
+            )
+        else:
+            self.train_log.appendPlainText(
+                f"\nThe install did not finish (exit code {code}). The output "
+                "above says where it stopped; a missing C++ compiler is the "
+                "usual reason."
+            )
+        # either way, report what the machine can actually do now
+        self.check_gpu()
+
     # ------------------------------------------------------------- step 5 run
     def _choose_model_dir(self) -> None:
         name = QFileDialog.getExistingDirectory(
@@ -1283,6 +1358,7 @@ class Detectron2Panel(QWidget):
             (self.train_button, "d2_train"),
             (self.stop_train_button, "d2_train"),
             (self.recheck_button, "d2_gpu"),
+            (self.install_button, "d2_install"),
             (self.train_log, "d2_train"),
             (self.contours_dir, "d2_contours_folder"),
             (self.export_command, "d2_export"),

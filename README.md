@@ -99,6 +99,19 @@ whether this machine has one and runs training here if it does; otherwise it
 says what is missing and points at the Colab notebook. The export is handed
 over as a command either way, because it takes days over a collection.
 
+PyTorch and Detectron2 are **not** installed with the package, deliberately.
+PyPI's PyTorch wheel for Windows is CPU-only, so requiring it would quietly
+stop idtracker.ai's own identity tracking using your GPU; and Detectron2 is
+not on PyPI at all, so requiring it would make installing this software fail
+on any machine without a C++ compiler. Instead:
+
+```bash
+idtrackerai_d2_install_gpu
+```
+
+works out what your machine needs, shows you the commands, and runs them only
+if you agree. Step 5 offers the same thing as a button.
+
 You can close the app between steps; each one records what it produced, and
 status is re-derived from disk when you come back.
 

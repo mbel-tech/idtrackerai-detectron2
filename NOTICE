@@ -225,7 +225,8 @@ Files added:
       subprocess when the machine has a CUDA GPU, and the contour export,
       handed over as a command because it takes days over a collection.
       Colab is the fallback for machines without a GPU rather than the
-      route. The panel
+      route, and a button installs PyTorch and Detectron2 for the machine
+      when they are missing. The panel
       keeps its own editable list of videos to draw annotation frames
       from, independent of the tracking session, so one model can be
       trained across every recording from a setup while each recording is

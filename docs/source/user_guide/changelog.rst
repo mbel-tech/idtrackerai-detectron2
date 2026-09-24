@@ -92,6 +92,15 @@ Segmentation changes
   Detectron2 into the GUI process. The export is handed over as a command,
   because roughly an hour per 30 000-frame clip means days over a collection.
   Colab is now the fallback for machines without a GPU rather than the route.
+- New ``idtrackerai_d2_install_gpu`` command, and a button in step 5, that
+  installs PyTorch and Detectron2 for the machine they run on: the GPU and its
+  CUDA version are detected, the matching PyTorch index is chosen and checked
+  to exist, and the commands are shown before anything runs. Neither package
+  can be an ordinary dependency -- PyPI's PyTorch wheel for Windows is
+  CPU-only, so declaring it would silently disable the GPU for idtracker.ai's
+  own identity tracking, and Detectron2 is not on PyPI at all and builds from
+  source, so declaring it would make installation fail on any machine without
+  a compiler.
 - The Segmentation App's left column scrolls. It asks for more height than a
   laptop screen has, and the layout answered that by shrinking every widget
   below its natural size, which left a preparation step too short to show its
