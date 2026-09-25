@@ -877,7 +877,10 @@ class Detectron2Panel(QWidget):
         )
         known = [self._counts.get(v) for v in videos]
         counted = [c for c in known if c]
-        parts = [f"{len(videos)} videos", f"{len(groups)} recordings"]
+        def plural(n: int, noun: str) -> str:
+            return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+        parts = [plural(len(videos), "video"), plural(len(groups), "recording")]
         if len(counted) == len(videos):
             parts.append(f"{sum(counted):,} frames")
         else:

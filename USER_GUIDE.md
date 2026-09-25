@@ -180,14 +180,16 @@ fish.
 
 **Switching to "Dark animals" does not rescue it.** The fish are darker than
 the water, so that is the obvious next thing to try, and several settings do
-produce exactly five blobs. They are the black bars above and below the frame
-and the shadowed tank walls — single blobs of 150,000 to 360,000 pixels, next
-to fish of about 2,000. Push the threshold past about 115 and the whole frame
-merges into one blob instead.
+produce exactly five blobs. Measure them and the trap is plain: two are about
+2,000 pixels and sit where the fish are, and the other three are 268,000,
+362,000 and 4,000 — the black bars above and below the frame, and the shadowed
+tank walls. The count is right, two of the five blobs are right, and the
+result is still useless. Push the threshold past about 115 and the whole frame
+merges into a single blob instead.
 
 Masking the borders off with a region of interest does not rescue it either.
-Restricted to open water, the count swings between one and seven as the
-threshold moves and never settles anywhere near five: there is no plateau to
+Restricted to open water, the blob count swings between one and seven as the
+threshold moves and never settles anywhere near five. There is no plateau to
 find, because no single brightness separates a fish from the water it is in.
 
 Two things here will mislead you, and both are worth knowing before you spend
@@ -195,10 +197,10 @@ a day tuning sliders.
 
 **The blob count can be right for the wrong reason.** In the screenshot the
 app catches the problem — *More blobs than animals!* — but that warning only
-fires when there are too many. Tuned differently this same frame gives exactly
-five blobs, matching the five fish, with no warning at all, and every one of
-them is scenery. A blob count that agrees with your animal count is not
-evidence the right things were found. Look at the picture.
+fires when there are too many. The five-blob settings above trip nothing at
+all, and three of those five are scenery. A blob count that agrees with your
+animal count is not evidence the right things were found. Look at the
+picture, and at the spread of the bars.
 
 **No amount of parameter tuning fixes this.** Thresholding asks one question,
 "is this pixel brighter than X", and on this footage that question has no good
@@ -241,29 +243,36 @@ own list of videos.
 
 ![The sampling step: a list of clips, a summary reading how many videos and recordings, and a line predicting the per-clip allocation](docs/images/app-detectron2-sample.png)
 
-**Add folder...** takes every clip from a setup. The summary underneath counts
-the videos, how many *recordings* they group into, and their total length.
-Above the button, a line says what the run would do before it does it — how
-many frames from how many clips, and the smallest and largest share. If it
-warns that some clips would get no frames at all, raise the count: a clip with
-no frames in the training set is a clip the model never learned.
+**Add folder...** takes every clip from a setup; **Use open videos** takes the
+ones already loaded. The summary underneath counts them — in the picture,
+*4 videos, 1 recording, 119,350 frames* — and above the **Sample frames**
+button a line says what the run would do before it does it: *600 frames from
+4 of 4 videos, 150 each*.
 
-A few hundred frames is usual.
+Read that line. It is there so you can catch a bad allocation before spending
+an evening annotating: if it says some clips would get no frames at all, raise
+the count, because a clip with no frames in the training set is a clip the
+model never learned. A few hundred frames is usual.
 
 ### Step 3 — Annotate
 
-**Open in LabelMe** launches the annotation tool on the sampled frames, with
+![The annotate step, with a class name of 'fish' and the message 'Sample some frames first'](docs/images/app-detectron2-annotate.png)
+
+Set **Class name** to whatever you are outlining — `fish` above. The step is
+shown here before step 2 has run, which is why **Open in LabelMe** is greyed
+out and it says *Sample some frames first*; it unlocks once frames exist.
+
+**Open in LabelMe** then launches the annotation tool on those frames, with
 your class name preloaded. Draw one polygon around each animal, in every
-frame. It saves as you go, so you can stop and come back.
+frame. It saves as you go, so you can stop and come back, and **Refresh
+count** tells you how far along you are.
 
 This is the slow part — budget an evening for a few hundred frames — and it is
 the part that determines how good the model gets. Outline the animal, not its
 shadow or its reflection.
 
-![The annotate step, showing the annotated count and the Get Colab bundle button](docs/images/app-detectron2-annotate.png)
-
-When the count reads that every frame is done, click **Get Colab bundle...**.
-It writes `colab_bundle.zip` and tells you what else to put on Google Drive.
+When every frame is done, click **Get Colab bundle...**. It writes
+`colab_bundle.zip` and tells you what else to put on Google Drive.
 
 > Click **Save parameters** too. The notebook reads that file and carries your
 > animal count, area thresholds, region of interest and tracking interval
@@ -274,12 +283,15 @@ It writes `colab_bundle.zip` and tells you what else to put on Google Drive.
 ## 7. The GPU stages
 
 Training a model and running it over every frame both want a GPU. You have two
-routes, and they do the same work.
+routes and they do the same work: the panel's steps 4 to 6, or the notebook,
+whose own sections are numbered 4 to 12. The numbers are unrelated — the
+notebook simply breaks the same work into smaller pieces.
 
 ### Here, if you have an NVIDIA card
 
-Steps 4 to 6 of the panel run the same stages on your own machine. Step 5
-checks first and renames itself to say what it found:
+Steps 4, 5 and 6 of the panel — build dataset, train, export contours — run
+the stages on your own machine. Step 5 checks what it has to work with first,
+and renames itself to say so:
 
 ![The train step, headed 'Train - needs Colab', listing what is missing and how to install it](docs/images/app-detectron2-train.png)
 
@@ -303,9 +315,13 @@ memory, not skill. The app infers the grouping from filenames and prints it.
 Read that box. In the picture it says all four clips fell into one group, so
 there is nothing to split on and it will fall back to splitting by file — the
 honest outcome for four segments of a single recording, and a sign you want
-footage from more than one recording before trusting the validation score.
+footage from more than one recording before trusting the score that training
+reports.
 
-Skip to section 8 once the export has finished.
+Step 5 then trains, and **step 6 exports contours**: it runs the finished
+model over every frame of every clip in the list and writes one `.h5` file per
+clip. That is the long one — reckon on about an hour per 30,000-frame clip.
+Skip to section 8 when it finishes.
 
 ### Or in Colab, if you do not
 
@@ -318,7 +334,8 @@ asks where. Then open `colab_detectron2_pipeline.ipynb` from inside the zip.
 > The screenshots in this section show the notebook as it opens. They do not
 > show output, because the runs take hours and could not be captured here.
 
-Set the runtime to a GPU first: **Runtime → Change runtime type → T4**.
+Set the runtime to a GPU first: **Runtime → Change runtime type → GPU**.
+The first cell runs `nvidia-smi` and tells you if you forgot.
 
 **Only one cell needs editing.** It is marked, and everything else reads from
 it:
@@ -336,16 +353,23 @@ and splits them into a training set and a validation set, by recording, for
 the reason given above. It prints the grouping it inferred before acting on
 it — read that the same way you would read it in the app.
 
-**Training** takes about an hour.
+**Training** is around 40 epochs, which the notebook puts at roughly an hour
+on an L4 — longer on a slower card, so treat it as an order of magnitude
+rather than a promise.
 
-![The training section of the notebook](docs/images/colab-train.png)
+![The training section of the notebook, noting that checkpoints land every fifth of the run](docs/images/colab-train.png)
+
+It checkpoints every fifth of the run, so a Colab disconnect does not cost you
+the whole hour: there is a commented-out cell directly below that resumes
+instead of restarting.
 
 Afterwards, look at `segm/AP` on the validation set. It is a score out of 1 for
-how well the predicted outlines match the drawn ones. Read it against the split
-above: if train and validation shared clips, the number flatters the model.
+how well the predicted outlines match the drawn ones. Read it against the
+split above — if train and validation shared clips, the number flatters the
+model — which is exactly what the notebook prints beside it.
 
-**Exporting contours** runs the model over every frame of every clip, and it is
-the long one — roughly an hour per 30,000-frame clip, so days for a collection.
+**Exporting contours** is the same step 6 as above, and the long one: roughly
+an hour per 30,000-frame clip, so days for a whole collection.
 
 ![The export section, explaining that it is resumable](docs/images/colab-export.png)
 
