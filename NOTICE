@@ -255,6 +255,14 @@ Files added:
   VALIDATOR.md
       What this fork changes in the Validator, and why.
 
+  USER_GUIDE.md
+      An illustrated guide for someone who has not tracked an animal
+      before, covering both segmentation routes end to end.
+
+  docs/make_screenshots.py, docs/images/
+      The screenshots used by that guide, and the script that drives the
+      Segmentation App offscreen to regenerate them.
+
   NOTICE, CITATION.cff
       This file and citation metadata.
 

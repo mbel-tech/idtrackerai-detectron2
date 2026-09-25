@@ -12,6 +12,9 @@ instead of finding them by intensity thresholding.
 identification network and gap closing are upstream idtracker.ai's, unmodified.
 Only the step that turns pixels into blobs is replaced.
 
+> **New to idtracker.ai?** Start with the **[User Guide](USER_GUIDE.md)** —
+> what this does, how to install it, and a first tracking run.
+
 > [!IMPORTANT]
 > This is an **unofficial derivative**. It is not affiliated with, endorsed by,
 > or supported by the de Polavieja Lab or the Champalimaud Foundation. Please do

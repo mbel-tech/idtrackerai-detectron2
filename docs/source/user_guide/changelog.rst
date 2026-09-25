@@ -135,6 +135,18 @@ Segmentation changes
   line run the same code. Every stage is also an installed
   ``idtrackerai_d2_*`` command.
 
+Documentation changes
+---------------------
+
+- New ``USER_GUIDE.md``: an illustrated guide for someone who has not tracked
+  an animal before, covering the vocabulary, installation, a first run by
+  thresholding, what its failure looks like on real footage, the Detectron2
+  route both locally and in Colab, tracking from external contours, and the
+  Validator.
+- New ``docs/make_screenshots.py``, which drives the Segmentation App offscreen
+  to regenerate every screenshot in that guide, so the images can be refreshed
+  when the interface changes.
+
 Packaging changes
 -----------------
 
