@@ -25,13 +25,18 @@ thresholds to tune.
     7  track              external_contours = one .h5 per clip of the session
 ```
 
-Steps 1–4 are in the GUI and run anywhere. Steps 5–6 need a CUDA GPU: the panel
-checks whether this machine has one, runs training here when it does, and hands
-over the export as a command, since a collection takes days and that does not
-belong behind a window you cannot close. When there is no GPU,
-`idtrackerai_d2_bundle` packages the Colab notebook. Colab is the fallback, not
-the route — uploading tens of gigabytes of video to a hosted runtime makes
-little sense when the card is already in the machine.
+There are two ways through this, and which is better depends on one thing: do
+you have a CUDA card?
+
+**With one**, the Segmentation App does steps 1–4 and runs training itself; it
+checks for the card rather than assuming, and hands over the export as a
+command, since a collection takes days and that does not belong behind a window
+you cannot close. Nothing leaves the machine.
+
+**Without one** — which is the common case for people tracking animals — the
+Colab notebook does the whole project instead, with only the annotating left on
+your own machine. `idtrackerai_d2_bundle` packages it. Uploading the clips is
+the price, and it buys a GPU you do not have.
 
 **A recording saved in several clips is tracked as one session.** Give
 `external_contours` one file per video path, in the same order; the Segmentation
@@ -44,6 +49,34 @@ inference that it was annotated on, and training on CLAHE-enhanced frames while
 predicting on raw ones costs accuracy without raising an error. The settings are
 written beside the frames, copied into the dataset, recorded with the weights,
 and adopted by the exporter unless you override them.
+
+## From one Colab notebook
+
+`idtrackerai_d2_bundle` packages a notebook that runs the whole project, for
+every clip from one setup, in two sittings:
+
+```
+  Colab   1-3   point at the clips, preview the enhancement, sample frames
+  home          annotate them in LabelMe
+  Colab   4-9   upload, build the dataset, train, export contours
+  Colab  11-12  write one parameter file per recording, and track
+```
+
+Annotation is the one step that cannot move. LabelMe is a desktop application
+and a Colab runtime has no display, so the notebook samples the frames, hands
+them over, and takes them back. Everything between the two sittings lives on
+Drive, so nothing is lost by closing the tab.
+
+The parameter files it writes for tracking **inherit whatever the Segmentation
+App saved** - the file from *Save parameters*, the same one a legacy
+thresholding run would use - so the number of animals, the area thresholds, the
+region of interest and the tracking interval carry over instead of being
+retyped. One file per recording, with its clips and their contour files in
+matching order.
+
+Tracking on the Colab runtime is offered but **has not been run there**; the
+notebook says so where it matters, and the same parameter files work unchanged
+on your own machine.
 
 ## From the Segmentation App
 

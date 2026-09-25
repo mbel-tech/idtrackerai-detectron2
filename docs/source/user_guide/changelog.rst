@@ -92,6 +92,16 @@ Segmentation changes
   Detectron2 into the GUI process. The export is handed over as a command,
   because roughly an hour per 30 000-frame clip means days over a collection.
   Colab is now the fallback for machines without a GPU rather than the route.
+- The Colab notebook now runs a whole project rather than only the two GPU
+  stages: it points at every clip from one setup, previews the enhancement,
+  samples frames across all of them, and after you annotate them locally takes
+  them back, builds the dataset, trains, exports contours, and writes one
+  idtracker.ai parameter file per recording. Those files inherit the
+  configuration saved by the Segmentation App, so the animal count, area
+  thresholds, region of interest and tracking interval carry over. Annotation
+  stays local because LabelMe is a desktop application and a runtime has no
+  display. A section that tracks on the runtime is included and marked as
+  untested there.
 - New ``idtrackerai_d2_install_gpu`` command, and a button in step 5, that
   installs PyTorch and Detectron2 for the machine they run on: the GPU and its
   CUDA version are detected, the matching PyTorch index is chosen and checked
