@@ -54,6 +54,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from idtrackerai.extra_tools.detectron2_pipeline import bundle as bundle_mod
 from idtrackerai.extra_tools.detectron2_pipeline import dataset as dataset_mod
 from idtrackerai.extra_tools.detectron2_pipeline import gpu as gpu_mod
 from idtrackerai.extra_tools.detectron2_pipeline import install_gpu as install_mod
@@ -259,6 +260,11 @@ class Detectron2Panel(QWidget):
         self.open_folder_button.clicked.connect(self.open_frames_folder)
         self.refresh_button = QPushButton("Refresh count")
         self.refresh_button.clicked.connect(self.refresh)
+        # Where the Colab route begins. Annotating is the last step that wants
+        # eyes on the footage, so this is the moment someone without a CUDA
+        # card needs the notebook -- not buried in the docs.
+        self.bundle_button = QPushButton("Get Colab bundle...")
+        self.bundle_button.clicked.connect(self.save_colab_bundle)
         self.annotate_status = WrappedLabel()
 
         form = QFormLayout()
@@ -268,6 +274,7 @@ class Detectron2Panel(QWidget):
         row.addWidget(self.launch_button)
         row.addWidget(self.open_folder_button)
         row.addWidget(self.refresh_button)
+        row.addWidget(self.bundle_button)
 
         layout = QVBoxLayout(page)
         layout.addLayout(form)
@@ -552,6 +559,50 @@ class Detectron2Panel(QWidget):
         layout.addWidget(self.export_command)
         layout.addWidget(self.copy_command_button)
         return page
+
+    def save_colab_bundle(self) -> None:
+        """Write the Colab bundle, and say what else has to go on Drive.
+
+        Offered here because annotating is the last step that wants eyes on
+        the footage. Everything after it needs a CUDA card, and for anyone
+        without one that means Colab -- so this is the moment they need the
+        notebook, not a line in the documentation.
+        """
+        frames = self.state.frames_path if self.state else None
+        default = Path(self.frames_dir.text() or ".").parent / "colab_bundle.zip"
+        name, _ = QFileDialog.getSaveFileName(
+            self, "Save the Colab bundle", str(default), filter="Zip (*.zip)"
+        )
+        if not name:
+            return
+
+        try:
+            written = bundle_mod.build(Path(name))
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not write the bundle", str(exc))
+            return
+
+        size_kb = written.stat().st_size / 1024
+        upload = [f"{written}          (this bundle)"]
+        if frames is not None and frames.is_dir():
+            upload.append(f"{frames}          (your frames and annotations)")
+        else:
+            upload.append("the folder holding your annotated frames")
+
+        QMessageBox.information(
+            self,
+            "Colab bundle written",
+            f"{written.name} ({size_kb:.0f} KB)\n\n"
+            "Put these in one folder on Google Drive:\n\n  "
+            + "\n  ".join(upload)
+            + "\n\nThe videos go on Drive too, anywhere you like - the "
+            "notebook asks where. Then open "
+            "colab_detectron2_pipeline.ipynb from inside the bundle.\n\n"
+            "It picks up at step 4 and runs to the end: dataset, training, "
+            "contour export, and the parameter files for tracking.\n\n"
+            "Tip: 'Save parameters' writes a .toml the notebook will inherit, "
+            "so your animal count, ROI and area thresholds carry over.",
+        )
 
     # ----------------------------------------------------- GPU capability
     def check_gpu(self) -> None:
@@ -1388,6 +1439,7 @@ class Detectron2Panel(QWidget):
             (self.launch_button, "d2_labelme"),
             (self.open_folder_button, "d2_open_folder"),
             (self.refresh_button, "d2_refresh"),
+            (self.bundle_button, "d2_bundle"),
             (self.expected_instances, "d2_expected"),
             (self.val_fraction, "d2_val_fraction"),
             (self.group_by, "d2_group_by"),

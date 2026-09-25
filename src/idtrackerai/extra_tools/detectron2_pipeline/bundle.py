@@ -5,12 +5,11 @@ Ships from the installed package rather than from a repository checkout, so
 matters because the GPU stages are the part most likely to be run by someone
 who never cloned anything.
 
-Everything except annotation travels. Sampling and dataset building used to be
-left behind as "local steps", but a machine with no CUDA card has no reason to
-do them locally either, and driving them from the notebook keeps one project's
-work in one place. Annotation is the exception and always will be: LabelMe is a
-desktop application and Colab has no display, so the notebook samples frames,
-hands them over for annotating, and takes them back.
+What travels is everything needed from the annotated frames onward: building
+the dataset, training, exporting contours. Choosing the enhancement, sampling
+frames and annotating them stay in the Segmentation App, because each wants
+eyes on the footage -- and LabelMe could not run on a Colab runtime in any
+case, having no display to draw on.
 
 Several files are written at archive paths that differ from their module names,
 because the notebook and the scripts locate each other by those paths once
@@ -32,9 +31,8 @@ from pathlib import Path
 PIPELINE_FILES = [
     ("preprocessing.py", "tools/preprocessing.py"),
     ("errors.py", "tools/errors.py"),
-    # imported by name from a flat folder on the runtime, which is why each of
-    # these falls back to a bare "from errors import ..." with no package
-    ("sampling.py", "tools/sampling.py"),
+    # imported by name from a flat folder on the runtime, which is why it
+    # falls back to a bare "from errors import ..." with no package
     ("dataset.py", "tools/dataset.py"),
     ("training.py", "tools/train_detectron2.py"),
     ("inference.py", "tools/detectron2_export_contours.py"),

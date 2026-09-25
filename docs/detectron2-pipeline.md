@@ -34,9 +34,10 @@ command, since a collection takes days and that does not belong behind a window
 you cannot close. Nothing leaves the machine.
 
 **Without one** — which is the common case for people tracking animals — the
-Colab notebook does the whole project instead, with only the annotating left on
-your own machine. `idtrackerai_d2_bundle` packages it. Uploading the clips is
-the price, and it buys a GPU you do not have.
+app still does steps 1 to 3, and the Colab notebook takes over from your
+annotated frames. The **Get Colab bundle...** button hands you the notebook at
+exactly that point. Uploading the clips is the price, and it buys a GPU you do
+not have.
 
 **A recording saved in several clips is tracked as one session.** Give
 `external_contours` one file per video path, in the same order; the Segmentation
@@ -50,22 +51,30 @@ predicting on raw ones costs accuracy without raising an error. The settings are
 written beside the frames, copied into the dataset, recorded with the weights,
 and adopted by the exporter unless you override them.
 
-## From one Colab notebook
+## The Colab notebook, for a machine without a CUDA card
 
-`idtrackerai_d2_bundle` packages a notebook that runs the whole project, for
-every clip from one setup, in two sittings:
+Steps 1 to 3 happen in the Segmentation App, because each wants your eyes on
+the footage: judging the enhancement, seeing how the frames are spread across
+the clips, and drawing the polygons. Step 3 is also the one step that could
+never move -- LabelMe is a desktop application and a runtime has no display.
+
+When you have finished annotating, the app's **Get Colab bundle...** button on
+the Annotate step writes `colab_bundle.zip`, and tells you what else to put on
+Drive. The notebook inside it is **steps 4 to 12**:
 
 ```
-  Colab   1-3   point at the clips, preview the enhancement, sample frames
-  home          annotate them in LabelMe
-  Colab   4-9   upload, build the dataset, train, export contours
-  Colab  11-12  write one parameter file per recording, and track
+  app     1-3   enhancement, sample frames, annotate in LabelMe
+                        |
+  Colab   4-5   your annotated frames -> the COCO dataset
+          6-8   install Detectron2, check the dataset, train
+          9-10  export one contour file per clip, check them
+         11-12  one parameter file per recording, then track
 ```
 
-Annotation is the one step that cannot move. LabelMe is a desktop application
-and a Colab runtime has no display, so the notebook samples the frames, hands
-them over, and takes them back. Everything between the two sittings lives on
-Drive, so nothing is lost by closing the tab.
+The two *Setup* sections before step 4 are not pipeline steps: they mount
+Drive, unpack the bundle and locate the videos, and you run them at the start
+of each session. Everything between sittings lives on Drive, so closing the tab
+costs nothing.
 
 The parameter files it writes for tracking **inherit whatever the Segmentation
 App saved** - the file from *Save parameters*, the same one a legacy
@@ -105,12 +114,16 @@ pipeline**:
    and `--validate-label exact` so a typo cannot create a second class. The step
    header counts annotated frames.
 4. **Build dataset** — validates every polygon and shows the report inline.
+   Only needed if you are training on this machine; the Colab notebook builds
+   it for you otherwise.
 
 Close the app whenever you like. Each step records what it produced beside the
 data, and status is re-derived from disk on reload, so a deleted folder shows as
 incomplete rather than as a step that lies about being done.
 
-Then upload the dataset and your videos to Drive and open the notebook.
+If this machine has no CUDA card, use **Get Colab bundle...** on the Annotate
+step once the polygons are drawn. It writes the zip and lists what else to put
+on Drive.
 
 ## From the command line
 

@@ -92,16 +92,18 @@ Segmentation changes
   Detectron2 into the GUI process. The export is handed over as a command,
   because roughly an hour per 30 000-frame clip means days over a collection.
   Colab is now the fallback for machines without a GPU rather than the route.
-- The Colab notebook now runs a whole project rather than only the two GPU
-  stages: it points at every clip from one setup, previews the enhancement,
-  samples frames across all of them, and after you annotate them locally takes
-  them back, builds the dataset, trains, exports contours, and writes one
-  idtracker.ai parameter file per recording. Those files inherit the
-  configuration saved by the Segmentation App, so the animal count, area
-  thresholds, region of interest and tracking interval carry over. Annotation
-  stays local because LabelMe is a desktop application and a runtime has no
-  display. A section that tracks on the runtime is included and marked as
-  untested there.
+- The Colab notebook carries a project from the annotated frames to the end:
+  it builds the COCO dataset, trains, exports one contour file per clip, and
+  writes one idtracker.ai parameter file per recording. Those files inherit
+  the configuration saved by the Segmentation App, so the animal count, area
+  thresholds, region of interest and tracking interval carry over rather than
+  being retyped. Its sections are numbered 4 to 12, continuing from the app's
+  steps 1 to 3 -- enhancement, sampling and annotating, which stay there
+  because each needs eyes on the footage, and because LabelMe cannot run on a
+  runtime with no display. A section that tracks on the runtime is included
+  and marked as untested there.
+- New **Get Colab bundle...** button on the annotate step, which writes the
+  bundle and lists what else to put on Drive.
 - New ``idtrackerai_d2_install_gpu`` command, and a button in step 5, that
   installs PyTorch and Detectron2 for the machine they run on: the GPU and its
   CUDA version are detected, the matching PyTorch index is chosen and checked

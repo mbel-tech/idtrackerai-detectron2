@@ -233,9 +233,9 @@ Files added:
       still tracked separately. It previews the per-video allocation
       before sampling, counting frames on a background thread, and shows
       the train/validation grouping it inferred before the dataset is
-      built. The Colab bundle carries the sampling and dataset modules as
-      well as the GPU ones, so one notebook runs a whole project; only
-      annotation stays local, LabelMe being a desktop application.
+      built. A button on the annotate step writes the Colab bundle and
+      names what else to upload, so the handover to a hosted GPU starts
+      where the last hands-on step ends.
 
   src/idtrackerai/segmentation_app/widgets/enhancement_widget.py
   src/idtrackerai/segmentation_app/widgets/enhancement_preview.py
