@@ -121,6 +121,7 @@
 - Modify: `preprocessing.py` (`make_enhancer_from`, `add_arguments`, `_explicit_from_args`, `_demo`)
 - Modify: `src/idtrackerai/base/animals_detection/segmentation.py:175-189` (`apply_enhancement`)
 - Modify: `src/idtrackerai/segmentation_app/widgets/enhancement_preview.py:122-129` (`_ensure_pixmap`)
+- Modify: `src/idtrackerai/extra_tools/detectron2_pipeline/sampling.py:275-295` (`check_enhancement_unchanged`)
 - Test: `tests/light_edits_test.py`
 
 **Interfaces:**
@@ -132,12 +133,12 @@
   - `test_cli_flags_reach_the_settings`: build a parser with `fp.add_arguments`, parse `["--exposure", "0.5", "--gamma", "1.4"]`, `fp.resolve_settings(args)[0]` has `exposure == 0.5` and `gamma == 1.4` and `shadows == 0`; with no flags it equals `DEFAULT_SETTINGS`.
   - `test_cli_flag_out_of_range_is_rejected`: `--denoise 50` makes `resolve_settings` raise `PreprocessingError` (it runs `normalize_settings` on the merged result; add that call).
   - `test_profile_round_trip_with_light_edits`: `save_profile` then `load_profile` returns the same ten values; an old profile file written with only the six old keys loads and normalizes.
-  - `test_sampling_compares_the_new_keys`: import `sampling`'s profile-comparison helper at `sampling.py:281-290` (read it first to get the exact name) and assert a differing `exposure` is reported.
+  - `test_sampling_refuses_frames_enhanced_with_different_light_edits`: `sampling.check_enhancement_unchanged(folder, settings)` (`sampling.py:275`) raises `SamplingError` when the folder's recorded profile has `exposure` 0.5 and `settings` has 1.0, and also when the recorded profile is an old one without light-edit keys and `settings` has `exposure` 1.0 (missing recorded key counts as the default). It does not raise when both are at defaults.
   - `test_preview_uses_the_shared_function` (needs Qt, offscreen): construct `EnhancementPreview`, set settings with `exposure=1.0`, call `_ensure_pixmap(0, frame)`, and compare the pixmap's image bytes to `enhance_with_settings(frame, settings)`.
 
 - [ ] **Step 2: Run** `python -m pytest tests/light_edits_test.py -q`. Expected: the new tests FAIL.
 
-- [ ] **Step 3: Implement.** `make_enhancer_from`, `apply_enhancement` (after its `normalize_enhancement`) and `_ensure_pixmap` call `enhance_with_settings`; delete their hand-written keyword lists. `make_enhancer_from` still returns `for_detectron2`'s three-channel form (`cv2.cvtColor(..., GRAY2BGR)` around `enhance_with_settings`). Add the ten flags in `add_arguments` and the names to the tuple in `_explicit_from_args`. In `resolve_settings`, run `normalize_settings` on the final dict before returning. Rewrite `_demo` to produce its strip as `[gray, enhance_with_settings(frame, settings)]` with caption `"grayscale | enhanced"` (drop its private re-implementation of the steps).
+- [ ] **Step 3: Implement.** `make_enhancer_from`, `apply_enhancement` (after its `normalize_enhancement`) and `_ensure_pixmap` call `enhance_with_settings`; delete their hand-written keyword lists. `make_enhancer_from` still returns `for_detectron2`'s three-channel form (`cv2.cvtColor(..., GRAY2BGR)` around `enhance_with_settings`). In `sampling.check_enhancement_unchanged`, compare `recorded.get(key, DEFAULT_SETTINGS.get(key))` instead of skipping keys absent from `recorded` (import `DEFAULT_SETTINGS` beside `SETTING_KEYS` at `sampling.py:29-33`, both import branches). Add the ten flags in `add_arguments` and the names to the tuple in `_explicit_from_args`. In `resolve_settings`, run `normalize_settings` on the final dict before returning. Rewrite `_demo` to produce its strip as `[gray, enhance_with_settings(frame, settings)]` with caption `"grayscale | enhanced"` (drop its private re-implementation of the steps).
 
 - [ ] **Step 4: Run** `QT_QPA_PLATFORM=offscreen python -m pytest tests -q -k "not smoke"`. Expected: all PASS.
 
@@ -165,7 +166,7 @@
   - `test_set_settings_selects_a_preset_only_on_full_match`: `setSettings(PRESETS["Standard"])` selects `Standard`; the same dict with `exposure=0.1` selects `Custom`.
   - `test_old_settings_without_light_edits_load`: `setSettings({"clahe_clip": 1.5, "clahe_tile": 8, "illumination_sigma": 25.0, "illumination_downsample": 4, "correct_lighting": True, "enhance": True})` selects `Standard`.
   - `test_groups_are_collapsible`: each of the four group toggles hides and shows its sliders, and the open/closed state survives a `setSettings` call.
-  - `test_cliplabel_is_renamed`: `widget.contrast_label.text() == "Local contrast (CLAHE)"`.
+  - `test_clahe_label_is_renamed`: `widget.contrast_label.text() == "Local contrast (CLAHE)"`.
 
 - [ ] **Step 2: Run** `QT_QPA_PLATFORM=offscreen python -m pytest tests/light_edits_widget_test.py -q`. Expected: FAIL (module missing).
 
