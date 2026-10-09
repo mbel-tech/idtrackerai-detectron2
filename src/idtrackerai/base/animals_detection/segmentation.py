@@ -162,12 +162,22 @@ def get_blobs_in_frame(
     return blobs_in_frame
 
 
+def normalize_enhancement(enhancement: dict | None) -> dict | None:
+    """Completes a partial enhancement dict from the defaults. Unknown keys raise
+    an IdtrackeraiError naming them, instead of a KeyError in a pool worker."""
+    try:
+        return fp.normalize_settings(enhancement)
+    except fp.PreprocessingError as exc:
+        raise IdtrackeraiError(str(exc)) from exc
+
+
 def apply_enhancement(frame: np.ndarray, enhancement: dict) -> np.ndarray:
     """Grayscale plus the configured enhancement, in one place.
 
     Used by segmentation, by the background model and by the GUI preview, so
     all three agree on what the image looks like.
     """
+    enhancement = normalize_enhancement(enhancement)
     return fp.enhance(
         frame,
         clahe_clip=enhancement["clahe_clip"],
@@ -200,8 +210,9 @@ def process_frame(
     if external_contours is not None:
         # Contours come from an external instance-segmentation model. The frame
         # is still returned as usual: it is the source of the bounding box
-        # images, so identification images keep the video's own pixels, masked
-        # by the external contour instead of by a threshold.
+        # images, so identification images are cut from this same (enhanced,
+        # when enhancement is on) frame, masked by the external contour instead
+        # of by a threshold.
         return contours_from_external(
             external_contours, frame_number, area_ths, ROI_mask, frame
         )
@@ -469,7 +480,9 @@ def compute_background(
 
 
 def load_custom_background(
-    path: str, example_video_path: Path | str | None = None
+    path: str,
+    example_video_path: Path | str | None = None,
+    enhancement: dict | None = None,
 ) -> np.ndarray:
     logging.info(f"Loading custom background from {path}")
     try:
@@ -482,9 +495,16 @@ def load_custom_background(
             " image file."
         ) from exc
 
-    if example_video_path is None:
-        return bkg
+    if example_video_path is not None:
+        check_background_shape(bkg, example_video_path)
 
+    # Frames are enhanced before the comparison, so a user's image must be too
+    if enhancement and enhancement.get("enhance", True):
+        bkg = apply_enhancement(bkg, enhancement)
+    return bkg
+
+
+def check_background_shape(bkg: np.ndarray, example_video_path: Path | str) -> None:
     cap = cv2.VideoCapture(str(example_video_path))
     required_shape = (
         int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
@@ -499,8 +519,6 @@ def load_custom_background(
             f" ({example_video_path}). Please upload a background image with the"
             " correct dimensions."
         )
-
-    return bkg
 
 
 def to_gray_scale(frame: np.ndarray) -> np.ndarray:

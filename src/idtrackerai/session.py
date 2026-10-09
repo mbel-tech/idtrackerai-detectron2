@@ -238,6 +238,10 @@ class Session:
             if self.intensity_ths is None:
                 self.intensity_ths = [0, 255]
 
+        # Validated here, in the main process, so a bad .toml fails now rather
+        # than as a KeyError inside every pool worker.
+        self.enhancement = self.normalized_enhancement(self.enhancement)
+
         if self.area_ths is None:
             raise IdtrackeraiError("Missing area thresholds parameter")
 
@@ -299,7 +303,12 @@ class Session:
         self.width, self.height, self.frames_per_second = (
             self.get_info_from_video_paths(self.video_paths)
         )
-        self.number_of_frames, _, self.tracking_intervals, self.episodes = (
+        (
+            self.number_of_frames,
+            self.video_paths_n_frames,
+            self.tracking_intervals,
+            self.episodes,
+        ) = (
             self.get_processing_episodes(
                 self.video_paths, self.frames_per_episode, self.tracking_intervals
             )
@@ -397,7 +406,17 @@ class Session:
         ):
             # If the background was computed by the segmentation GUI, we move it to the final location
             self.background_path.unlink(missing_ok=True)
+            gui_sidecar = self.background_settings_path_of(
+                self.background_from_segmentation_gui
+            )
             self.background_from_segmentation_gui.rename(self.background_path)
+            # The App builds the background with the enhancement it hands to the
+            # session, so that is what it is recorded as unless the App left
+            # its own record beside the file.
+            if gui_sidecar.is_file():
+                gui_sidecar.replace(self.background_settings_path)
+            else:
+                self.write_background_settings()
             logging.info(
                 f"Background from Segmentation App moved to {self.background_path}"
             )
@@ -413,6 +432,7 @@ class Session:
         logging.info(f"Saving Session object in {self.path_to_session}", stacklevel=2)
         dict_to_save = (self.defaults() | vars(self)).copy()
         dict_to_save.pop("episodes", None)
+        dict_to_save.pop("video_paths_n_frames", None)
         dict_to_save.pop("output_dir", None)
         dict_to_save.pop("background_from_segmentation_gui", None)
         with self.path_to_session.open("w", encoding="utf-8") as file:
@@ -685,11 +705,59 @@ class Session:
             return
         # cv2.imwrite has given issues with paths containing chinese characters
         cv2.imencode(self.background_path.suffix, bkg)[1].tofile(self.background_path)
+        self.write_background_settings()
         logging.info(f"Background saved at {self.background_path}")
 
     @bkg_model.deleter
     def bkg_model(self) -> None:
         self.background_path.unlink(missing_ok=True)
+        self.background_settings_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def normalized_enhancement(enhancement: dict | None) -> dict | None:
+        """Completes a partial enhancement dict from the defaults and rejects
+        unknown keys, as an IdtrackeraiError."""
+        # imported here: the package imports Session before anything else
+        from .extra_tools.detectron2_pipeline.preprocessing import (
+            PreprocessingError,
+            normalize_settings,
+        )
+
+        try:
+            return normalize_settings(enhancement)
+        except PreprocessingError as exc:
+            raise IdtrackeraiError(str(exc)) from exc
+
+    @staticmethod
+    def background_settings_path_of(background_path: Path) -> Path:
+        return background_path.with_suffix(".enhancement.json")
+
+    @property
+    def background_settings_path(self) -> Path:
+        """Sidecar recording the enhancement the saved background was built with"""
+        return self.background_settings_path_of(self.background_path)
+
+    def effective_enhancement(self) -> dict | None:
+        enhancement = self.normalized_enhancement(self.enhancement)
+        return enhancement if enhancement and enhancement["enhance"] else None
+
+    def write_background_settings(self) -> None:
+        self.background_settings_path.write_text(
+            json.dumps({"enhancement": self.effective_enhancement()}),
+            encoding="utf-8",
+        )
+
+    def background_matches_enhancement(self) -> bool | None:
+        """Whether the saved background was built with the current enhancement.
+        None when there is no (readable) record, e.g. backgrounds saved by
+        earlier versions."""
+        try:
+            recorded = json.loads(
+                self.background_settings_path.read_text(encoding="utf-8")
+            )["enhancement"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        return recorded == self.effective_enhancement()
 
     @property
     def ROI_mask(self) -> np.ndarray | None:

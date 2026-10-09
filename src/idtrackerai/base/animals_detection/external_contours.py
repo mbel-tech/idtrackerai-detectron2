@@ -54,21 +54,24 @@ class ExternalContours:
             raise FileNotFoundError(f"External contour file not found: {self.path}")
 
         self._file = h5py.File(self.path, "r")
+        try:
+            version = self._file.attrs.get("format_version", 0)
+            if version != FORMAT_VERSION:
+                raise ValueError(
+                    f"{self.path} has contour format version {version}, this "
+                    f"idtracker.ai expects {FORMAT_VERSION}"
+                )
 
-        version = self._file.attrs.get("format_version", 0)
-        if version != FORMAT_VERSION:
-            raise ValueError(
-                f"{self.path} has contour format version {version}, this "
-                f"idtracker.ai expects {FORMAT_VERSION}"
-            )
+            self._vertices: h5py.Dataset = self._file["vertices"]  # type: ignore
+            self._vertex_offsets: np.ndarray = self._file["vertex_offsets"][:]  # type: ignore
+            self._frame_offsets: np.ndarray = self._file["frame_offsets"][:]  # type: ignore
 
-        self._vertices: h5py.Dataset = self._file["vertices"]  # type: ignore
-        self._vertex_offsets: np.ndarray = self._file["vertex_offsets"][:]  # type: ignore
-        self._frame_offsets: np.ndarray = self._file["frame_offsets"][:]  # type: ignore
-
-        self.n_frames = int(self._file.attrs["n_frames"])  # type: ignore
-        self.width = int(self._file.attrs["width"])  # type: ignore
-        self.height = int(self._file.attrs["height"])  # type: ignore
+            self.n_frames = int(self._file.attrs["n_frames"])  # type: ignore
+            self.width = int(self._file.attrs["width"])  # type: ignore
+            self.height = int(self._file.attrs["height"])  # type: ignore
+        except BaseException:
+            self._file.close()
+            raise
 
     @property
     def attrs(self) -> dict[str, Any]:
@@ -130,7 +133,14 @@ class ContourSequence:
         if not paths:
             raise ValueError("No external contour files were given")
         self.paths = paths
-        self.readers = [ExternalContours(p) for p in paths]
+        self.readers: list[ExternalContours] = []
+        try:
+            for p in paths:
+                self.readers.append(ExternalContours(p))
+        except BaseException:
+            # a later file failed: do not leave the earlier ones open
+            self.close()
+            raise
 
         # global frame -> file, by binary search on the cumulative boundaries
         self._boundaries = np.cumsum(
@@ -202,6 +212,15 @@ def get_external_contours(path_or_paths) -> "ExternalContours | ContourSequence"
     return _OPEN_FILES[key]
 
 
+def close_all() -> None:
+    """Closes the readers this process opened through get_external_contours()."""
+    for key in list(_OPEN_FILES):
+        try:
+            _OPEN_FILES.pop(key).close()
+        except Exception:  # noqa: BLE001 - closing must not mask the real result
+            logging.debug("Could not close external contours %s", key, exc_info=True)
+
+
 def validate_against_video(
     path_or_paths,
     n_frames: int,
@@ -222,8 +241,10 @@ def validate_against_video(
     if not paths:
         raise ValueError("No external contour files were given")
 
-    readers = [ExternalContours(p) for p in paths]
+    readers: list[ExternalContours] = []
     try:
+        for p in paths:
+            readers.append(ExternalContours(p))
         problems = []
         total = sum(reader.n_frames for reader in readers)
 

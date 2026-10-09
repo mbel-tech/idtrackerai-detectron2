@@ -64,6 +64,37 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 SETTING_KEYS = tuple(DEFAULT_SETTINGS)
 
 
+def normalize_settings(settings: dict | None) -> dict | None:
+    """Fills a possibly partial settings dict from the defaults, rejecting typos.
+
+    ``None`` stays ``None`` (no enhancement configured). A partial dict such as
+    ``{"clahe_clip": 2.0}`` is completed, so a .toml that sets one key does not
+    raise a KeyError deep inside a pool worker. Unknown keys are an error rather
+    than silently ignored, because a misspelt key would otherwise leave the
+    setting at its default without a word.
+    """
+    if settings is None:
+        return None
+    if not isinstance(settings, dict):
+        raise PreprocessingError(
+            f"enhancement must be a table of settings, got {type(settings).__name__}"
+        )
+    unknown = sorted(set(settings) - set(SETTING_KEYS))
+    if unknown:
+        raise PreprocessingError(
+            f"Unknown enhancement setting(s): {', '.join(map(repr, unknown))}. "
+            f"Valid settings are: {', '.join(SETTING_KEYS)}"
+        )
+    merged = {**DEFAULT_SETTINGS, **settings}
+    for key in ("clahe_clip", "illumination_sigma"):
+        if isinstance(merged[key], bool) or not isinstance(merged[key], (int, float)):
+            raise PreprocessingError(f"enhancement '{key}' must be a number")
+    for key in ("clahe_tile", "illumination_downsample"):
+        if isinstance(merged[key], bool) or not isinstance(merged[key], int):
+            raise PreprocessingError(f"enhancement '{key}' must be an integer")
+    return merged
+
+
 def to_gray(frame: np.ndarray) -> np.ndarray:
     if frame.ndim > 2:
         return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
