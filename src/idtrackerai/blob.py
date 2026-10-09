@@ -853,12 +853,20 @@ class Blob:
         removal markers the two disagree.
         """
         self.init_validator_variables()
+        # After partial edits the list can be shorter than the identities the
+        # indices below refer to. None means "same as assigned", so padding is
+        # neutral.
+        missing = len(self.all_final_identities) - len(self.user_generated_identities)
+        if missing > 0:
+            self.user_generated_identities.extend([None] * missing)
 
         # Raises ValueError if the clicked identity is not here; the caller
         # (and the propagation loop) treats that as "nothing to do".
         index_a, centroid_a, _ = self.index_and_centroid_closer_to(
             close_to_centroid, identity_a
         )
+        if identity_a == identity_b:  # swapping an identity with itself is a no-op
+            return centroid_a
 
         index_b = self._index_of_identity(identity_b)
 
@@ -900,12 +908,45 @@ class Blob:
         centroid : tuple
             Centroid hint locating `identity_a` in this blob.
         """
+        # All-or-nothing: if anything unexpected fails half way, every blob
+        # touched so far gets its previous identities back.
+        saved: list[tuple[Blob, list[int | None] | None]] = []
+        try:
+            return self._propagate_swap_identity(
+                identity_a, identity_b, centroid, saved
+            )
+        except Exception:
+            for blob, identities in reversed(saved):
+                blob.user_generated_identities = identities  # type: ignore
+            raise
+
+    def _propagate_swap_identity(
+        self,
+        identity_a: int,
+        identity_b: int,
+        centroid: tuple[float, float],
+        saved: list,
+    ) -> tuple[int, int]:
         blobs_stack: list[tuple[Blob, tuple[float, float]]]
         first_frame_modified = self.frame_number
         last_frame_modified = self.frame_number
 
+        def swap(blob: "Blob", hint: tuple[float, float]) -> tuple[float, float]:
+            saved.append(
+                (
+                    blob,
+                    None
+                    if blob.user_generated_identities is None
+                    else list(blob.user_generated_identities),
+                )
+            )
+            return blob.swap_identity(identity_a, identity_b, hint)
+
+        if identity_a == identity_b:
+            return first_frame_modified, last_frame_modified
+
         try:
-            centroid = self.swap_identity(identity_a, identity_b, centroid)
+            centroid = swap(self, centroid)
         except ValueError:  # centroid not found on self, nothing to propagate
             return first_frame_modified, last_frame_modified
 
@@ -915,9 +956,7 @@ class Blob:
             if current.fragment_identifier != self.fragment_identifier:
                 continue
             try:
-                new_centroid = current.swap_identity(
-                    identity_a, identity_b, previous_centroid
-                )
+                new_centroid = swap(current, previous_centroid)
             except ValueError:  # centroid not found on "current"
                 continue
             blobs_stack += [(next_blob, new_centroid) for next_blob in current.next]
@@ -929,9 +968,7 @@ class Blob:
             if current.fragment_identifier != self.fragment_identifier:
                 continue
             try:
-                new_centroid = current.swap_identity(
-                    identity_a, identity_b, previous_centroid
-                )
+                new_centroid = swap(current, previous_centroid)
             except ValueError:  # centroid not found on "current"
                 continue
             blobs_stack += [(prev_blob, new_centroid) for prev_blob in current.previous]

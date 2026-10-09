@@ -65,3 +65,22 @@ def test_explicit_paths_are_filtered_too(tmp_path: Path):
 
     videos = sampling.resolve_videos([real, companion])
     assert videos == [real]
+
+
+def test_sampling_private_copy_agrees_with_shared_helper():
+    """sampling.py keeps its own `_is_sidecar`; the two must not drift apart."""
+    names = [
+        "._B3_N1_segment_2.mp4",
+        "._clip.avi",
+        ".DS_Store",
+        "Thumbs.db",
+        "desktop.ini",
+        "B3_N1_segment_2.mp4",
+        "clip.avi",
+        ".hidden_but_real.mp4",
+        "recording._2.mp4",
+        "/some/dir/._clip.mp4",
+        "/some/dir/clip.mp4",
+    ]
+    for name in names:
+        assert sampling._is_sidecar(name) == is_metadata_sidecar(Path(name).name), name

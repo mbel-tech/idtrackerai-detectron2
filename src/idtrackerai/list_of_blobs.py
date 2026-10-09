@@ -1,4 +1,5 @@
 import logging
+import os
 import pickle
 from collections.abc import Iterable, Iterator, Sequence
 from io import BytesIO
@@ -96,14 +97,22 @@ class ListOfBlobs:
         file_path = resolve_path(file_path)
         logging.info(f"Saving ListOfBlobs at {file_path}", stacklevel=2)
         file_path.parent.mkdir(exist_ok=True)
+        # Written beside the target and moved over it, so a failed or
+        # interrupted save cannot truncate the pickle that is already there.
+        tmp_path = file_path.with_name(file_path.name + ".tmp")
         self.disconnect()
+        try:
+            for blob in self.all_blobs:
+                clean_attrs(blob)
 
-        for blob in self.all_blobs:
-            clean_attrs(blob)
-
-        with open_track(file_path, "wb", verbose=verbose) as file:
-            pickle.dump(self, file, protocol=pickle.HIGHEST_PROTOCOL)
-        self.reconnect()
+            with open_track(tmp_path, "wb", verbose=verbose) as file:
+                pickle.dump(self, file, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp_path, file_path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        finally:
+            self.reconnect()
 
     @classmethod
     def _load_from_v4(cls, path: Path, verbose: bool = True) -> "ListOfBlobs":

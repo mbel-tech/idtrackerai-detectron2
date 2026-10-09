@@ -19,10 +19,18 @@ from requests import post
 
 from .py_utils import idtrackerai_version
 
-ANALYTICS_STATE_FILE_PATH = Path(__file__).parent / "usage_analytics_state.json"
+# A new name on purpose: upstream wrote "true" to usage_analytics_state.json by
+# default, so reading that file would carry its opt-out default into this fork.
+ANALYTICS_STATE_FILE_PATH = Path(__file__).parent / "usage_analytics_optin.json"
 ANALYTICS_URL = "https://analytics.polaviejalab.org/report_usage.php"
 PYPI_URL = "https://pypi.org/simple/idtrackerai"
 ANALYTICS_ENVIRON = "IDTRACKERAI_DISABLE_ANALYTICS"
+ANALYTICS_ENABLE_ENVIRON = "IDTRACKERAI_ENABLE_ANALYTICS"
+FORK_URL = "https://github.com/mbel-tech/idtrackerai-detectron2"
+UPDATE_HINT = (
+    f"To update, get the latest version from {FORK_URL} and reinstall it "
+    '(for instance "python -m pip install --upgrade ." from a fresh clone)'
+)
 
 
 class ComparisonResult(Enum):
@@ -55,26 +63,20 @@ def set_usage_analytics_state(enabled: bool) -> None:
 
 
 def get_usage_analytics_state() -> bool:
-    """Returns the current state of the usage
-    analytics reporting. If the state is not set,
-    it will return True and set the state to True."""
-    environ = os.environ.get(ANALYTICS_ENVIRON, "").lower()
-    if environ in ("1", "true"):
-        state = False
-    elif environ in ("0", "false") or not ANALYTICS_STATE_FILE_PATH.exists():
-        state = True
-    else:
-        state = json.loads(ANALYTICS_STATE_FILE_PATH.read_text())
+    """Returns whether usage analytics reporting is enabled.
 
-    current_state = (
-        json.loads(ANALYTICS_STATE_FILE_PATH.read_text())
-        if ANALYTICS_STATE_FILE_PATH.exists()
-        else None
-    )
-    if state != current_state:
-        set_usage_analytics_state(state)
-
-    return state
+    This fork reports nothing unless the user opts in, either with
+    IDTRACKERAI_ENABLE_ANALYTICS=1 or with the "Report usage analytics" switch
+    in the apps. IDTRACKERAI_DISABLE_ANALYTICS=1 always wins.
+    """
+    if os.environ.get(ANALYTICS_ENVIRON, "").lower() in ("1", "true"):
+        return False
+    if os.environ.get(ANALYTICS_ENABLE_ENVIRON, "").lower() in ("1", "true"):
+        return True
+    try:
+        return json.loads(ANALYTICS_STATE_FILE_PATH.read_text()) is True
+    except (OSError, ValueError):
+        return False
 
 
 def report_usage() -> None:
@@ -92,7 +94,7 @@ def report_usage() -> None:
                 "platform": platform(True),
                 "idtrackerai_version": idtrackerai_version(),
                 "python_version": python_version(),
-                "command": sys.argv,
+                "command": Path(sys.argv[0]).stem if sys.argv else "",  # never paths
             },
         )
         if response.status_code != 200:
@@ -110,6 +112,17 @@ def check_version_on_console() -> None:
             logging.error(message)
         elif kind != ComparisonResult.EQUAL:
             logging.warning(message)
+
+
+def parse_release(version: str) -> tuple[int, ...]:
+    """The numeric release of a version string, ignoring pre-release and local parts.
+
+    "6.0.15a0+detectron2.1" and "6.0.15+detectron2.1" both give (6, 0, 15).
+    """
+    release = re.match(r"\s*v?(\d+(?:\.\d+)*)", version)
+    if release is None:
+        raise ValueError(f"Not a valid version string: {version!r}")
+    return tuple(map(int, release.group(1).split(".")))
 
 
 @lru_cache(maxsize=1)
@@ -131,9 +144,8 @@ def check_version() -> tuple[ComparisonResult, str]:
     )
 
     current_version_str = idtrackerai_version()
-    current_version = current_version_str.split("a")[0]
     try:
-        current_version = tuple(map(int, current_version.split(".")))
+        current_version = parse_release(current_version_str)
     except Exception as e:
         logging.error(f"Error parsing current version: {e}")
         return ComparisonResult.ERROR, (
@@ -141,11 +153,14 @@ def check_version() -> tuple[ComparisonResult, str]:
             "valid version string."
         )
 
-    latest_version = max(
+    stable_versions = [
         tuple(map(int, version.split(".")))
         for version, _file_extension in matches
         if version.replace(".", "").isdigit()  # only keep stable versions
-    )
+    ]
+    if not stable_versions:
+        return ComparisonResult.ERROR, "No stable release found in the PyPI data"
+    latest_version = max(stable_versions)
 
     latest_version_str = ".".join(map(str, latest_version))
 
@@ -154,26 +169,25 @@ def check_version() -> tuple[ComparisonResult, str]:
             return ComparisonResult.MAJOR_UPDATE, (
                 f"A new major release of idtracker.ai is available: {current_version_str} -> "
                 f"{latest_version_str}\n"
-                'To update, run: "python -m pip install --upgrade idtrackerai"'
+                f"{UPDATE_HINT}"
             )
         elif latest_version[1] > current_version[1]:
             return ComparisonResult.MINOR_UPDATE, (
                 f"A new minor release of idtracker.ai is available: {current_version_str} -> "
                 f"{latest_version_str}\n"
-                'To update, run: "python -m pip install --upgrade idtrackerai"'
+                f"{UPDATE_HINT}"
             )
         elif latest_version[2] > current_version[2]:
             return ComparisonResult.PATCH_UPDATE, (
                 f"A new patch release of idtracker.ai is available: {current_version_str} -> "
                 f"{latest_version_str}\n"
-                'To update, run: "python -m pip install --upgrade idtrackerai"'
+                f"{UPDATE_HINT}"
             )
-        elif "a" in current_version_str:
+        elif re.search(r"(a|b|rc)\d*$", current_version_str.split("+")[0]):
             return ComparisonResult.STABLE_RELEASE, (
-                "You are running an alpha version of idtracker.ai and the stable"
-                f" version is available: {idtrackerai_version()} ->"
-                f" {latest_version_str}\nTo update, run: python -m pip install --upgrade"
-                " idtrackerai"
+                "You are running a pre-release version of idtracker.ai and the stable"
+                f" version is available: {current_version_str} ->"
+                f" {latest_version_str}\n{UPDATE_HINT}"
             )
         else:
             return ComparisonResult.EQUAL, (
