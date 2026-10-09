@@ -32,8 +32,8 @@ single-channel image is replicated across three channels by :func:`for_detectron
 """
 
 import argparse
-import json
 import functools
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -197,8 +197,9 @@ def tone_lut(
     """
     x = np.arange(256) / 255.0
 
-    # Levels: blacks/whites move the input end points inward.
-    black_in = 0.5 * blacks / 100
+    # Levels: positive whites pull the white point in (brighter whites) and
+    # positive blacks push the black point out (lifted blacks).
+    black_in = -0.5 * blacks / 100
     white_in = max(1 - 0.5 * whites / 100, black_in + 0.05)
     x = np.clip((x - black_in) / (white_in - black_in), 0, 1)
     x = np.clip(x * 2.0**exposure, 0, 1)

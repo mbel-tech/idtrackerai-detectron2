@@ -237,8 +237,8 @@ The **preset** menu offers None, Gentle, Standard and Strong. Choose **Custom**
 to open the individual sliders, in four collapsible groups:
 
 - **Light** — exposure, brightness and gamma.
-- **Tone** — contrast, shadows, highlights, blacks and whites. This group
-  starts folded away; click its name to open it.
+- **Tone** — contrast, shadows, highlights, blacks and whites. Positive blacks
+  lifts the dark end; positive whites brightens the bright end.
 - **Detail** — sharpness, denoise, and the local contrast (CLAHE) strength and
   tile size.
 - **Evenness** — lighting evenness.

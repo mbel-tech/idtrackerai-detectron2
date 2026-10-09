@@ -108,6 +108,8 @@ def test_groups_are_collapsible(widget):
             assert all(
                 groups.sliders[k].isVisibleTo(groups) == want_open for k in sliders
             )
+    # every group starts open, so an active Tone edit is never hidden
+    assert all(t.isChecked() for t in groups.toggles.values())
     groups.toggles["Tone"].setChecked(False)
     widget.setSettings({**fp.DEFAULT_SETTINGS, "shadows": 40})
     assert not groups.toggles["Tone"].isChecked()
@@ -126,3 +128,38 @@ def test_tooltips_cover_every_light_edit(widget):
     tips = tomllib.loads(path.read_text(encoding="utf-8"))
     widget.setToolTips(tips)
     assert widget.groups.sliders["shadows"].toolTip()
+
+
+@pytest.fixture
+def warnings_seen(monkeypatch, widgets):
+    seen = []
+    monkeypatch.setattr(
+        widgets[0].QMessageBox, "warning", lambda *a, **k: seen.append(a[1:])
+    )
+    return seen
+
+
+@pytest.mark.parametrize("bad", ["5.0", "NaN"])
+def test_profile_with_bad_value_warns_and_changes_nothing(
+    widget, widgets, warnings_seen, monkeypatch, tmp_path, bad
+):
+    path = tmp_path / "bad.json"
+    path.write_text('{"exposure": %s}' % bad)
+    monkeypatch.setattr(
+        widgets[0].QFileDialog, "getOpenFileName", lambda *a, **k: (str(path), "")
+    )
+    widget.setSettings({**fp.DEFAULT_SETTINGS, "shadows": 40})
+    before = widget.settings()
+    widget.load_profile()
+    assert widget.settings() == before
+    assert len(warnings_seen) == 1
+    assert warnings_seen[0][0] == "Could not read the setup"
+
+
+def test_set_settings_with_bad_value_warns_and_changes_nothing(widget, warnings_seen):
+    widget.setSettings({**fp.DEFAULT_SETTINGS, "shadows": 40})
+    before = widget.settings()
+    widget.setSettings({"exposure": 99})
+    assert widget.settings() == before
+    assert len(warnings_seen) == 1
+    assert warnings_seen[0][0] == "Invalid enhancement settings"

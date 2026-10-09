@@ -24,8 +24,8 @@ class _ValueSlider(QWidget):
 
     Works in integer steps internally because QSlider is integer-only, and
     shows the real value, so "1.5" is never displayed as "15". Double-clicking
-    returns it to its default. It lives here, and is re-exported by
-    enhancement_widget, so the two modules do not import each other.
+    returns it to its default. It lives in this module, which
+    enhancement_widget imports.
     """
 
     valueChanged = Signal(float)
@@ -117,8 +117,6 @@ GROUPS = {
     "Detail": ("sharpness", "denoise", "clahe_clip", "clahe_tile"),
     "Evenness": ("illumination_sigma",),
 }
-# Tone is the one most people leave alone, so it starts folded away
-_CLOSED = ("Tone",)
 
 
 class LightEditGroups(QWidget):
@@ -161,7 +159,7 @@ class LightEditGroups(QWidget):
             toggle.toggled.connect(
                 lambda open_, t=toggle, b=body: self._set_open(t, b, open_)
             )
-            self._set_open(toggle, body, title not in _CLOSED)
+            self._set_open(toggle, body, True)
             layout.addWidget(toggle)
             layout.addWidget(body)
 

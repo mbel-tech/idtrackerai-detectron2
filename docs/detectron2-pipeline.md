@@ -95,8 +95,8 @@ pipeline**:
 1. **Enhancement** — a preset (None / Gentle / Standard / Strong), or Custom for
    the individual light edits (exposure, brightness, contrast, gamma, shadows,
    highlights, blacks, whites, sharpness, denoise) alongside local contrast and
-   lighting evenness, previewed live on the frame you are looking at. Drag the raw↔enhanced slider to compare. Save it as
-   this setup's profile.
+   lighting evenness, previewed live on the frame you are looking at. Drag the
+   raw↔enhanced slider to compare. Save it as this setup's profile.
 2. **Sample frames** — the videos to draw from, how many frames, the selection
    number, the output folder. Runs in the background with a cancellable progress
    bar; a cancelled run keeps the frames it wrote.

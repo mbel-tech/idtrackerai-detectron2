@@ -31,10 +31,7 @@ from qtpy.QtWidgets import (
 
 from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
 from idtrackerai.GUI_tools import WrappedLabel
-from idtrackerai.segmentation_app.widgets.light_edits import (
-    LightEditGroups,
-    _ValueSlider,  # noqa: F401  (re-exported)
-)
+from idtrackerai.segmentation_app.widgets.light_edits import LightEditGroups
 
 NONE = "None"
 GENTLE = "Gentle"
@@ -54,10 +51,20 @@ PRESETS = {
 
 # light edit -> tooltip name; the tone contrast is told apart from the CLAHE one
 _LIGHT_TIPS = {
-    **{k: k for k in (
-        "exposure", "brightness", "gamma", "shadows", "highlights", "blacks",
-        "whites", "sharpness", "denoise",
-    )},
+    **{
+        k: k
+        for k in (
+            "exposure",
+            "brightness",
+            "gamma",
+            "shadows",
+            "highlights",
+            "blacks",
+            "whites",
+            "sharpness",
+            "denoise",
+        )
+    },
     "contrast": "contrast_tone",
 }
 
@@ -175,7 +182,11 @@ class EnhancementWidget(QWidget):
 
     def setSettings(self, settings: dict | None) -> None:
         if isinstance(settings, dict):
-            merged = {**fp.DEFAULT_SETTINGS, **settings}
+            try:
+                merged = fp.normalize_settings(settings)
+            except fp.PreprocessingError as exc:
+                QMessageBox.warning(self, "Invalid enhancement settings", str(exc))
+                return
         else:
             # no enhancement was asked for (a session without one, a .toml
             # without the key, or one saved by an older build holding only the
@@ -292,7 +303,7 @@ class EnhancementWidget(QWidget):
         if not name:
             return
         try:
-            settings = fp.load_profile(Path(name))
+            settings = fp.normalize_settings(fp.load_profile(Path(name)))
         except fp.PreprocessingError as exc:
             QMessageBox.warning(self, "Could not read the setup", str(exc))
             return

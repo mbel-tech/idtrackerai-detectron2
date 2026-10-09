@@ -124,7 +124,9 @@ def test_default_lut_is_identity():
         ({"shadows": 100}, 200, "same"),
         ({"highlights": -100}, 224, "down"),
         ({"highlights": -100}, 32, "same"),
-        ({"blacks": 50}, 20, "zero"),
+        ({"blacks": -50}, 20, "zero"),
+        ({"blacks": 50}, 0, "up"),
+        ({"blacks": 50}, 255, "same"),
         ({"whites": 50}, 230, "full"),
     ],
 )
@@ -154,8 +156,16 @@ def test_lut_is_monotonic_for_any_in_range_combination():
 
 
 def test_extreme_levels_stay_finite():
-    lut = _lut(blacks=100, whites=-100)
-    assert lut.dtype == np.uint8 and lut.shape == (256,)
+    # the black point meets the white point: the guard keeps it finite
+    for kwargs in ({"blacks": -100, "whites": 100}, {"blacks": 100, "whites": -100}):
+        lut = _lut(**kwargs)
+        assert lut.dtype == np.uint8 and lut.shape == (256,)
+        assert np.all(np.diff(lut.astype(int)) >= 0)
+
+
+def test_positive_blacks_lifts_and_stays_monotonic():
+    lut = _lut(blacks=50)
+    assert lut[0] > 0
     assert np.all(np.diff(lut.astype(int)) >= 0)
 
 
@@ -331,3 +341,31 @@ def test_preview_uses_the_shared_function(monkeypatch):
     bits.setsize(image.sizeInBytes())
     got = np.frombuffer(bits, np.uint8).reshape(h, image.bytesPerLine())[:, :w]
     assert np.array_equal(got, fp.enhance_with_settings(_rng_frame, settings))
+
+
+def test_old_format_background_sidecar_matches_identical_settings(
+    tmp_path, monkeypatch
+):
+    """A sidecar written before the light edits existed holds only the six
+    original keys; it must still count as built with the same settings."""
+    import json
+
+    from idtrackerai import Session
+    from idtrackerai.base.animals_detection.segmentation import load_custom_background
+
+    path = tmp_path / "background.png"
+    monkeypatch.setattr(Session, "background_path", property(lambda self: path))
+    image = np.tile(np.linspace(40, 90, 32, dtype=np.uint8), (32, 1))
+    cv2.imencode(".png", image)[1].tofile(path)
+
+    old = {k: fp.DEFAULT_SETTINGS[k] for k in _OLD_KEYS}
+    old.update(enhance=True, clahe_clip=2.0)
+    session = object.__new__(Session)
+    session.enhancement = dict(old)
+    session.background_settings_path.write_text(
+        json.dumps({"enhancement": old}), encoding="utf-8"
+    )
+
+    assert session.background_matches_enhancement() is True
+    # same settings: the saved image is used as is, not enhanced again
+    assert np.array_equal(load_custom_background(str(path), None, old), image)
