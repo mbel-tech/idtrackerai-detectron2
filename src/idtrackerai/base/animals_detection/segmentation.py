@@ -509,6 +509,9 @@ def load_custom_background(
         else None
     )
     recorded = _recorded_background_enhancement(path)
+    if isinstance(recorded, dict):
+        # A sidecar written before a setting existed lacks that key.
+        recorded = normalize_enhancement(recorded)
     if recorded is _NO_RECORD or recorded is None:
         if active:
             bkg = apply_enhancement(bkg, active)
