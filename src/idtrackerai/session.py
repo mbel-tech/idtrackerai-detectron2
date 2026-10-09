@@ -759,7 +759,12 @@ class Session:
             return None
         if isinstance(recorded, dict):
             # a sidecar written before a setting existed lacks that key
-            recorded = self.normalized_enhancement(recorded)
+            try:
+                recorded = self.normalized_enhancement(recorded)
+            except IdtrackeraiError:
+                # unknown key or out-of-range value (newer build, hand-edited
+                # file): not understood, so treat it as built differently
+                return False
         return recorded == self.effective_enhancement()
 
     @property
