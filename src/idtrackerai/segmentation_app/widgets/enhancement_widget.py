@@ -16,7 +16,7 @@ is chosen. Most people never need the numbers.
 
 from pathlib import Path
 
-from qtpy.QtCore import Qt, Signal  # type: ignore[reportPrivateImportUsage]
+from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore[reportPrivateImportUsage]
 from qtpy.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -102,6 +102,18 @@ class EnhancementWidget(QWidget):
     def __init__(self):
         super().__init__()
         self._loading = False
+        # the fields Custom has no slider for, kept from what was loaded so a
+        # profile with them set differently is not silently rewritten
+        self._extra = {
+            k: fp.DEFAULT_SETTINGS[k]
+            for k in ("illumination_downsample", "correct_lighting")
+        }
+        # wheel, keyboard and groove clicks change a slider without ever
+        # releasing it, so a value is also committed once it has settled
+        self._settle = QTimer(self)
+        self._settle.setSingleShot(True)
+        self._settle.setInterval(300)
+        self._settle.timeout.connect(self._committed)
 
         self.title = QLabel("Frame\nenhancement")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -175,8 +187,8 @@ class EnhancementWidget(QWidget):
 
         self.preset.currentTextChanged.connect(self._preset_changed)
         for slider in (self.contrast, self.detail, self.evenness):
-            slider.valueChanged.connect(lambda _v: self._changed())
-            slider.slider.sliderReleased.connect(self._committed)
+            slider.valueChanged.connect(lambda _v: self._slider_moved())
+            slider.slider.sliderReleased.connect(self._released)
         self.compare.valueChanged.connect(lambda v: self.splitChanged.emit(v / 100.0))
         self.save_button.clicked.connect(self.save_profile)
         self.load_button.clicked.connect(self.load_profile)
@@ -190,20 +202,26 @@ class EnhancementWidget(QWidget):
             "clahe_clip": round(self.contrast.value(), 2),
             "clahe_tile": int(self.detail.value()),
             "illumination_sigma": float(self.evenness.value()),
-            "illumination_downsample": fp.DEFAULT_SETTINGS["illumination_downsample"],
-            "correct_lighting": True,
+            **self._extra,
         }
 
     def setSettings(self, settings: dict | None) -> None:
-        if not isinstance(settings, dict):
-            # a .toml saved by an older build holds only the setting names
-            settings = None
-        merged = {**fp.DEFAULT_SETTINGS, **(settings or {})}
+        if isinstance(settings, dict):
+            merged = {**fp.DEFAULT_SETTINGS, **settings}
+        else:
+            # no enhancement was asked for (a session without one, a .toml
+            # without the key, or one saved by an older build holding only the
+            # setting names). The defaults would read as the Standard preset
+            # and switch enhancement on, so this has to mean "None".
+            merged = dict(PRESETS[NONE])
         name = CUSTOM
         for preset_name, preset in PRESETS.items():
             if all(merged.get(k) == preset[k] for k in fp.SETTING_KEYS):
                 name = preset_name
                 break
+        self._extra = {
+            k: merged[k] for k in ("illumination_downsample", "correct_lighting")
+        }
         self._loading = True
         try:
             self.preset.setCurrentText(name)
@@ -242,6 +260,15 @@ class EnhancementWidget(QWidget):
         self.summary.setText(fp.describe(settings))
         self.clear_error()
         self.settingsChanged.emit(settings)
+
+    def _slider_moved(self) -> None:
+        self._changed()
+        if not self._loading:
+            self._settle.start()
+
+    def _released(self) -> None:
+        self._settle.stop()
+        self._committed()
 
     def _committed(self, *_args) -> None:
         if not self._loading:

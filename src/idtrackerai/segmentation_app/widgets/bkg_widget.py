@@ -60,7 +60,9 @@ class BkgComputationThread(QThread):
             if not is_standard(self.background_stat):
                 # we load the custom background in the main thread because it can raise IdtrackeraiError
                 self.bkg = load_custom_background(
-                    self.background_stat, self.video_paths[0]
+                    self.background_stat,
+                    self.video_paths[0],
+                    enhancement=self.enhancement,
                 )
                 self.finished.emit()
             else:
@@ -248,6 +250,42 @@ class BkgWidget(QWidget):
             " video paths.",
         )
         self.checkBox.setChecked(False)
+
+    def enhancement_changed(self, settings: dict) -> None:
+        """A background built from differently enhanced frames is stale.
+
+        The frames it is compared against are enhanced with the new settings, so
+        it is dropped rather than reused. Called from the window's thread, so
+        the worker is stopped first instead of having its fields rewritten while
+        it runs.
+        """
+        thread = self.bkg_thread
+        if thread.isRunning():
+            thread.quit()  # sets the abort flag
+            thread.wait()
+        thread.enhancement = dict(settings)
+        thread.frame_stack = None
+        if not is_standard(thread.background_stat if hasattr(thread, "background_stat") else "median"):
+            # a user-supplied image: reload it, so it follows the enhancement
+            # (the image itself does not change)
+            if self.checkBox.isChecked() and hasattr(thread, "video_paths"):
+                try:
+                    thread.setStat(thread.background_stat)
+                except IdtrackeraiError as err:
+                    QMessageBox.critical(self, "Error", str(err))
+                    self.checkBox.setChecked(False)
+            return
+        had_background = thread.bkg is not None
+        thread.bkg = None
+        if self.checkBox.isChecked() and had_background:
+            QMessageBox.information(
+                self,
+                "Background deactivated",
+                "The subtracted background was computed from frames with the"
+                " previous enhancement. Check the background subtraction again"
+                " if desired when finish choosing the enhancement.",
+            )
+            self.checkBox.setChecked(False)
 
     def view_bkg_clicked(self):
         if self.bkg_thread.bkg is not None:

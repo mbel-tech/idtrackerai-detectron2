@@ -15,6 +15,7 @@ a job that takes days. Status is re-derived from disk on every load rather than
 trusted from the state file, so a deleted folder shows as incomplete.
 """
 
+import importlib.util
 import logging
 import sys
 from pathlib import Path
@@ -1040,6 +1041,16 @@ class Detectron2Panel(QWidget):
             QMessageBox.warning(self, "No frames", "Sample some frames first.")
             return
 
+        if importlib.util.find_spec("labelme") is None:
+            QMessageBox.warning(
+                self,
+                "LabelMe is not installed",
+                "Annotating needs LabelMe, which is an optional extra. Install "
+                "it into this environment with:\n\n"
+                f'  "{sys.executable}" -m pip install "idtrackerai-detectron2[annotate]"',
+            )
+            return
+
         arguments = ["-m", "labelme", str(folder)]
         label = self.class_name.text().strip()
         if label:
@@ -1064,7 +1075,7 @@ class Detectron2Panel(QWidget):
                 "Could not start LabelMe",
                 "Tried to run:\n\n"
                 f"  {sys.executable} {' '.join(arguments)}\n\n"
-                "LabelMe is a dependency of this package, so this usually means "
+                "LabelMe is installed but would not start, so this usually means "
                 "the environment is broken. Check that "
                 "'python -m labelme --help' works.",
             )
@@ -1286,6 +1297,11 @@ class Detectron2Panel(QWidget):
 
     def _training_error(self, error) -> None:
         self.train_log.appendPlainText(f"\nCould not run training: {error}")
+        if error == QProcess.ProcessError.FailedToStart:
+            # a process that never started never emits finished, so without
+            # this the Train and Install buttons would stay disabled for good
+            self.train_process = None
+            self._refresh_gpu_steps()
 
     def _training_finished(self, code: int, _status) -> None:
         self.train_process = None
@@ -1480,7 +1496,12 @@ class Detectron2Panel(QWidget):
                        self.count_thread, self.gpu_thread):
             if thread.isRunning():
                 thread.quit()
-                thread.wait(5000)
+                if not thread.wait(5000):
+                    # quit() only asks, and the GPU check in particular does
+                    # not listen. A QThread destroyed while it still runs
+                    # aborts the whole process.
+                    thread.terminate()
+                    thread.wait(2000)
         if self.state is not None:
             self.state.save()
         return super().close()

@@ -93,7 +93,13 @@ class SegmentationSourceWidget(QWidget):
         self.n_frames = n_frames
         self.video_size = video_size
         if video_paths is not None:
-            self.video_paths = [Path(p) for p in video_paths]
+            new_paths = [Path(p) for p in video_paths]
+            if self.paths and new_paths != self.video_paths:
+                # the contours belong to the previous video. Dropping them here
+                # means a .toml for another video is not first checked against
+                # contours that were never meant for it; setValue restores its own.
+                self.clear_to_thresholding()
+            self.video_paths = new_paths
         if self.paths:
             problem = self.describe_or_reject(self.paths)
             if problem:
@@ -218,6 +224,9 @@ class SegmentationSourceWidget(QWidget):
         self.source.blockSignals(True)
         self.source.setCurrentText(THRESHOLDING)
         self.source.blockSignals(False)
+        # the blocked signal is what tells the window to re-enable the
+        # thresholds and hide the Detectron2 panel, so say it explicitly
+        self.modeChanged.emit(THRESHOLDING)
         self.valueChanged.emit(None)
 
     # ------------------------------------------------------------ validation
