@@ -17,7 +17,12 @@ is self-correcting: stop painting and the raw frame is back.
 import logging
 
 import numpy as np
-from qtpy.QtCore import QObject, QPointF, QRectF, Signal  # type: ignore[reportPrivateImportUsage]
+from qtpy.QtCore import (  # type: ignore[reportPrivateImportUsage]
+    QObject,
+    QPointF,
+    QRectF,
+    Signal,
+)
 from qtpy.QtGui import QImage, QPixmap
 
 from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
