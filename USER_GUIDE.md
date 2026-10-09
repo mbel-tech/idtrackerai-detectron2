@@ -231,6 +231,29 @@ is written beside the sampled frames and travels all the way to inference, so
 the model is trained on, and later run on, the same kind of image. That
 consistency matters more than the exact numbers.
 
+#### Custom light edits
+
+The **preset** menu offers None, Gentle, Standard and Strong. Choose **Custom**
+to open the individual sliders, in four collapsible groups:
+
+- **Light** — exposure, brightness and gamma.
+- **Tone** — contrast, shadows, highlights, blacks and whites. This group
+  starts folded away; click its name to open it.
+- **Detail** — sharpness, denoise, and the local contrast (CLAHE) strength and
+  tile size.
+- **Evenness** — lighting evenness.
+
+Light, Detail and Evenness start open. Double-click any slider to return it to
+its default, or press **Reset all** to put every slider back.
+
+A few things worth knowing:
+
+- The edits work on grayscale frames only.
+- They are saved in the setup profile and travel with the trained model, like
+  the rest of enhancement, so inference sees the same kind of image.
+- **Denoise** is slower than the others and is off by default.
+- A profile saved with these settings is rejected by older builds of the app.
+
 > Enhancement applies to thresholding too, and it changes the brightness range
 > your intensity thresholds were chosen against. Turn both on and the app says
 > so, and tells you to watch the blob count while you re-tune them.

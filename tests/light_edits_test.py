@@ -26,7 +26,13 @@ def test_partial_dict_and_old_profile_are_completed():
 
 @pytest.mark.parametrize(
     "key, value",
-    [("exposure", 3.1), ("gamma", 0.2), ("denoise", 11), ("sharpness", -1), ("blacks", 101)],
+    [
+        ("exposure", 3.1),
+        ("gamma", 0.2),
+        ("denoise", 11),
+        ("sharpness", -1),
+        ("blacks", 101),
+    ],
 )
 def test_out_of_range_is_rejected(key, value):
     with pytest.raises(fp.PreprocessingError, match=key):
@@ -61,7 +67,10 @@ def test_missing_recorded_key_counts_as_default():
         recorded, {**fp.DEFAULT_SETTINGS, "exposure": 1.0}, "the model"
     )
     assert warning is not None and "exposure" in warning
-    assert fp.check_settings_match(recorded, dict(fp.DEFAULT_SETTINGS), "the model") is None
+    assert (
+        fp.check_settings_match(recorded, dict(fp.DEFAULT_SETTINGS), "the model")
+        is None
+    )
 
 
 # ------------------------------------------------------------ image operations
@@ -69,7 +78,14 @@ def test_missing_recorded_key_counts_as_default():
 ramp = np.tile(np.arange(256, dtype=np.uint8), (32, 1))
 _rng_frame = np.random.default_rng(0).integers(0, 255, (64, 64), dtype=np.uint8)
 _NEUTRAL = dict(
-    exposure=0, brightness=0, contrast=0, gamma=1.0, shadows=0, highlights=0, blacks=0, whites=0
+    exposure=0,
+    brightness=0,
+    contrast=0,
+    gamma=1.0,
+    shadows=0,
+    highlights=0,
+    blacks=0,
+    whites=0,
 )
 
 
@@ -131,9 +147,7 @@ def test_each_control_moves_the_ramp_the_right_way(kwargs, index, direction):
 def test_lut_is_monotonic_for_any_in_range_combination():
     ranges = fp.LIGHT_EDIT_RANGES
     names = list(_NEUTRAL)
-    choices = [
-        sorted({ranges[n][0], _NEUTRAL[n], ranges[n][1]}) for n in names
-    ]
+    choices = [sorted({ranges[n][0], _NEUTRAL[n], ranges[n][1]}) for n in names]
     for combo in itertools.product(*choices):
         lut = fp.tone_lut(*combo)
         assert np.all(np.diff(lut.astype(int)) >= 0), dict(zip(names, combo))
@@ -198,17 +212,38 @@ _OLD_KEYS = (
 
 def test_all_call_sites_agree():
     variants = [
-        {"clahe_clip": 2.0, "exposure": 0.7, "shadows": 30, "sharpness": 40, "denoise": 3},
-        {"clahe_clip": 2.0, "exposure": 0.7, "gamma": 1.4, "correct_lighting": True,
-         "illumination_downsample": 2, "illumination_sigma": 10.0},
-        {"clahe_clip": 3.0, "blacks": 20, "correct_lighting": False,
-         "illumination_downsample": 8, "illumination_sigma": 40.0},
+        {
+            "clahe_clip": 2.0,
+            "exposure": 0.7,
+            "shadows": 30,
+            "sharpness": 40,
+            "denoise": 3,
+        },
+        {
+            "clahe_clip": 2.0,
+            "exposure": 0.7,
+            "gamma": 1.4,
+            "correct_lighting": True,
+            "illumination_downsample": 2,
+            "illumination_sigma": 10.0,
+        },
+        {
+            "clahe_clip": 3.0,
+            "blacks": 20,
+            "correct_lighting": False,
+            "illumination_downsample": 8,
+            "illumination_sigma": 40.0,
+        },
     ]
     for extra in variants:
         settings = {**fp.DEFAULT_SETTINGS, **extra}
         want = fp.enhance_with_settings(_rng_frame, settings)
-        assert np.array_equal(segmentation.apply_enhancement(_rng_frame, settings), want)
-        assert np.array_equal(fp.make_enhancer_from(settings)(_rng_frame)[:, :, 0], want)
+        assert np.array_equal(
+            segmentation.apply_enhancement(_rng_frame, settings), want
+        )
+        assert np.array_equal(
+            fp.make_enhancer_from(settings)(_rng_frame)[:, :, 0], want
+        )
 
 
 def _parse(argv):
@@ -230,7 +265,13 @@ def test_cli_flag_out_of_range_is_rejected():
 
 
 def test_profile_round_trip_with_light_edits(tmp_path):
-    settings = {**fp.DEFAULT_SETTINGS, "exposure": 0.5, "gamma": 1.4, "shadows": 30, "denoise": 3}
+    settings = {
+        **fp.DEFAULT_SETTINGS,
+        "exposure": 0.5,
+        "gamma": 1.4,
+        "shadows": 30,
+        "denoise": 3,
+    }
     path = fp.save_profile(tmp_path / "p.json", settings)
     assert fp.load_profile(path) == settings
 
@@ -248,7 +289,9 @@ def _record(folder, **overrides):
 def test_sampling_refuses_frames_enhanced_with_different_light_edits(tmp_path):
     _record(tmp_path, exposure=0.5)
     with pytest.raises(SamplingError):
-        sampling.check_enhancement_unchanged(tmp_path, {**fp.DEFAULT_SETTINGS, "exposure": 1.0})
+        sampling.check_enhancement_unchanged(
+            tmp_path, {**fp.DEFAULT_SETTINGS, "exposure": 1.0}
+        )
 
     old = tmp_path / "old"
     old.mkdir()
@@ -256,7 +299,9 @@ def test_sampling_refuses_frames_enhanced_with_different_light_edits(tmp_path):
         json.dumps({k: fp.DEFAULT_SETTINGS[k] for k in _OLD_KEYS})
     )
     with pytest.raises(SamplingError):
-        sampling.check_enhancement_unchanged(old, {**fp.DEFAULT_SETTINGS, "exposure": 1.0})
+        sampling.check_enhancement_unchanged(
+            old, {**fp.DEFAULT_SETTINGS, "exposure": 1.0}
+        )
     sampling.check_enhancement_unchanged(old, dict(fp.DEFAULT_SETTINGS))
 
     same = tmp_path / "same"
