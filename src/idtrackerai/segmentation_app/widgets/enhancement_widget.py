@@ -174,11 +174,7 @@ class EnhancementWidget(QWidget):
     def settings(self) -> dict:
         if self.preset.currentText() != CUSTOM:
             return dict(PRESETS[self.preset.currentText()])
-        return {
-            "enhance": True,
-            **self.groups.values(),
-            **self._extra,
-        }
+        return {"enhance": True, **self.groups.values(), **self._extra}
 
     def setSettings(self, settings: dict | None) -> None:
         if isinstance(settings, dict):
@@ -231,8 +227,12 @@ class EnhancementWidget(QWidget):
             return
         settings = self.settings()
         enhancing = settings["enhance"]
-        for widget in (self.compare, self.compare_left, self.compare_right,
-                       self.save_button):
+        for widget in (
+            self.compare,
+            self.compare_left,
+            self.compare_right,
+            self.save_button,
+        ):
             widget.setEnabled(enhancing)
         self.summary.setText(fp.describe(settings))
         self.clear_error()
@@ -284,7 +284,9 @@ class EnhancementWidget(QWidget):
     # --------------------------------------------------------------- profiles
     def save_profile(self) -> None:
         name, _ = QFileDialog.getSaveFileName(
-            self, "Save this setup's enhancement", "preprocess_profile.json",
+            self,
+            "Save this setup's enhancement",
+            "preprocess_profile.json",
             filter="Setup profile (*.json)",
         )
         if not name:

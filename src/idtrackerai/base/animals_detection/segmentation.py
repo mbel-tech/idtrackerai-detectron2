@@ -10,6 +10,7 @@ import h5py
 import numpy as np
 
 from idtrackerai import Blob, Session
+from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
 from idtrackerai.start.arg_parser import pair_of_ints
 from idtrackerai.utils import (
     LOGGING_QUEUE,
@@ -20,8 +21,6 @@ from idtrackerai.utils import (
     track,
     wrap_entrypoint,
 )
-
-from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
 
 from .external_contours import get_external_contours
 
@@ -262,9 +261,7 @@ def contours_from_external(
             " happens if process_frame() is called without 'frame_number'."
         )
 
-    contours = get_external_contours(external_contours).contours_in_frame(
-        frame_number
-    )
+    contours = get_external_contours(external_contours).contours_in_frame(frame_number)
 
     areas = []
     good_contours = []
