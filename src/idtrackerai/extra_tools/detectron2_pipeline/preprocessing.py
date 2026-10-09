@@ -33,6 +33,7 @@ single-channel image is replicated across three channels by :func:`for_detectron
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,31 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "illumination_sigma": ILLUMINATION_SIGMA,
     "illumination_downsample": ILLUMINATION_DOWNSAMPLE,
     "correct_lighting": True,
+    # Light edits; every default means "no change".
+    "exposure": 0.0,
+    "brightness": 0,
+    "contrast": 0,
+    "gamma": 1.0,
+    "shadows": 0,
+    "highlights": 0,
+    "blacks": 0,
+    "whites": 0,
+    "sharpness": 0,
+    "denoise": 0,
+}
+
+# Inclusive (min, max) per light-edit key.
+LIGHT_EDIT_RANGES: dict[str, tuple[float, float]] = {
+    "exposure": (-3.0, 3.0),
+    "brightness": (-100, 100),
+    "contrast": (-100, 100),
+    "gamma": (0.3, 3.0),
+    "shadows": (-100, 100),
+    "highlights": (-100, 100),
+    "blacks": (-100, 100),
+    "whites": (-100, 100),
+    "sharpness": (0, 100),
+    "denoise": (0, 10),
 }
 
 SETTING_KEYS = tuple(DEFAULT_SETTINGS)
@@ -92,6 +118,17 @@ def normalize_settings(settings: dict | None) -> dict | None:
     for key in ("clahe_tile", "illumination_downsample"):
         if isinstance(merged[key], bool) or not isinstance(merged[key], int):
             raise PreprocessingError(f"enhancement '{key}' must be an integer")
+    for key, (lo, hi) in LIGHT_EDIT_RANGES.items():
+        value = merged[key]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not lo <= value <= hi
+        ):
+            raise PreprocessingError(
+                f"enhancement '{key}' must be a number between {lo} and {hi}"
+            )
     return merged
 
 
@@ -348,6 +385,13 @@ def describe(settings: dict) -> str:
         )
     else:
         parts.append("no illumination correction")
+    edits = [
+        f"{key}={settings[key]:+g}"
+        for key in LIGHT_EDIT_RANGES
+        if key in settings and settings[key] != DEFAULT_SETTINGS[key]
+    ]
+    if edits:
+        parts.append(", ".join(edits))
     return "; ".join(parts)
 
 
@@ -360,9 +404,11 @@ def check_settings_match(recorded: dict | None, current: dict, label: str) -> st
     if not recorded:
         return None
     differences = [
-        f"{key}: trained with {recorded[key]!r}, now {current[key]!r}"
+        f"{key}: trained with {was!r}, now {current[key]!r}"
         for key in current
-        if key in recorded and recorded[key] != current[key]
+        if key in DEFAULT_SETTINGS
+        for was in [recorded.get(key, DEFAULT_SETTINGS[key])]
+        if was != current[key]
     ]
     if not differences:
         return None
