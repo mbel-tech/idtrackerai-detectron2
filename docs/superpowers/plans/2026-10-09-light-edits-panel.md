@@ -88,7 +88,7 @@
 - [ ] **Step 1: Write the failing tests** (module-level helper `ramp = np.tile(np.arange(256, dtype=np.uint8), (32, 1))`, `rng` frame `integers(0, 255, (64, 64), uint8)`):
   - `test_default_output_is_identical_to_the_old_pipeline`: for the random frame and for `ramp`, `enhance_with_settings(f, DEFAULT_SETTINGS)` equals `apply_clahe(correct_illumination(to_gray(f), 4, 25.0), 1.5, 8)`, and equals the same with `correct_lighting=False` composition when that setting is off.
   - `test_default_lut_is_identity`: `tone_lut(0, 0, 0, 1.0, 0, 0, 0, 0)` equals `np.arange(256)`.
-  - `test_each_control_moves_the_ramp_the_right_way` (parametrized `(kwarg, value, mid_sample_should_be)`): applying `tone_lut` at index 128: `exposure=1` raises it, `exposure=-1` lowers it, `brightness=50` raises, `brightness=-50` lowers, `gamma=2.0` raises, `gamma=0.5` lowers, `contrast=100` leaves 128 within 1 of itself but maps index 192 higher and 64 lower, `contrast=-100` maps everything to within 1 of 128, `shadows=100` raises index 32 and leaves index 200 unchanged, `highlights=-100` lowers index 224 and leaves index 32 unchanged, `blacks=50` maps index 20 to 0 (crushed), `whites=50` maps index 230 to 255.
+  - `test_each_control_moves_the_ramp_the_right_way` (parametrized `(kwarg, value, mid_sample_should_be)`): applying `tone_lut` at index 128: `exposure=1` raises it, `exposure=-1` lowers it, `brightness=50` raises, `brightness=-50` lowers, `gamma=2.0` raises, `gamma=0.5` lowers, `contrast=100` leaves 128 within 1 of itself but maps index 192 higher and 64 lower, `contrast=-100` maps everything to within 1 of 128, `shadows=100` raises index 32 and leaves index 200 unchanged, `highlights=-100` lowers index 224 and leaves index 32 unchanged, `blacks=-50` maps index 20 to 0 (crushed) and `blacks=50` lifts index 0 above 0, `whites=50` maps index 230 to 255.
   - `test_lut_is_monotonic_for_any_in_range_combination`: over a grid of the extremes and 0 for all eight tone settings (`itertools.product`), `np.all(np.diff(lut.astype(int)) >= 0)`.
   - `test_extreme_levels_stay_finite`: `tone_lut(blacks=100, whites=-100, ...)` has no exception, dtype uint8, monotonic.
   - `test_denoise_reduces_noise_and_sharpen_increases_edges`: on a flat 100 frame plus Gaussian noise (seeded), `denoise(f, 8).std() < f.std()`; on a step-edge frame, `sharpen(f, 100)` has larger max gradient than `f`.
@@ -99,7 +99,7 @@
 - [ ] **Step 2: Run** `python -m pytest tests/light_edits_test.py -q`. Expected: new tests FAIL (`tone_lut` undefined).
 
 - [ ] **Step 3: Implement `tone_lut`** with `x = np.arange(256) / 255.0` and these stages, each followed by `np.clip(x, 0, 1)`:
-  1. Levels: `black_in = 0.5 * blacks / 100`; `white_in = 1 - 0.5 * whites / 100`; `white_in = max(white_in, black_in + 0.05)`; `x = (x - black_in) / (white_in - black_in)`.
+  1. Levels: `black_in = -0.5 * blacks / 100` (positive blacks lifts); `white_in = 1 - 0.5 * whites / 100`; `white_in = max(white_in, black_in + 0.05)`; `x = (x - black_in) / (white_in - black_in)`.
   2. `x = x * 2 ** exposure`.
   3. `x = x ** (1 / gamma)`.
   4. Bumps with amplitude `0.25 * v / 100`: `x += 0.25 * shadows/100 * np.where(x < 0.5, (1 - 2*x)**2, 0)` and `x += 0.25 * highlights/100 * np.where(x > 0.5, (2*x - 1)**2, 0)` (amplitude is capped at 0.25 because that is the largest that keeps the curve monotonic).
@@ -194,4 +194,4 @@
 ## Self-review notes
 
 - Spec coverage: processing order and tone/sharpen/denoise (Task 2); schema, ranges, old-profile loading, `check_settings_match` (Task 1); call sites, CLI flags, describe, demo, sampling (Tasks 1 and 3); panel, groups, reset, relabel, tooltips, `light_edits.py` split (Task 4); error handling is the range checks of Task 1 plus the existing preview-failure path; testing list is spread across the tasks; Colab constraint is in Global Constraints and checked by Task 3 importing nothing new.
-- Decisions the spec left open and this plan pins: level points are `0.5*blacks/100` and `1 - 0.5*whites/100` with a 0.05 minimum gap; shadow/highlight bump amplitude is capped at 0.25 (the monotonic limit); contrast is linear on both sides; denoise is `bilateralFilter(gray, 5, 8*s, s)`; sharpen uses sigma 2.0 and amount `sharpness/50`.
+- Decisions the spec left open and this plan pins: level points are `-0.5*blacks/100` (positive blacks lifts) and `1 - 0.5*whites/100` with a 0.05 minimum gap; shadow/highlight bump amplitude is capped at 0.25 (the monotonic limit); contrast is linear on both sides; denoise is `bilateralFilter(gray, 5, 8*s, s)`; sharpen uses sigma 2.0 and amount `sharpness/50`.

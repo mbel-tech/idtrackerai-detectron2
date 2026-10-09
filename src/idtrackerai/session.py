@@ -757,6 +757,9 @@ class Session:
             )["enhancement"]
         except (OSError, ValueError, KeyError, TypeError):
             return None
+        if isinstance(recorded, dict):
+            # a sidecar written before a setting existed lacks that key
+            recorded = self.normalized_enhancement(recorded)
         return recorded == self.effective_enhancement()
 
     @property

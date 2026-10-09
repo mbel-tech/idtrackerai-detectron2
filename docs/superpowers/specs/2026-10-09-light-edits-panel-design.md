@@ -38,7 +38,7 @@ Exposure, brightness, contrast, gamma, shadows, highlights, blacks and whites ar
 
 Applied to the normalised value `x` in [0, 1], in this order:
 
-1. Blacks and whites: remap so `blacks` becomes the new input black point and `whites` the white point (levels). Out-of-range values clip.
+1. Blacks and whites: a levels remap with input black point `black_in = -0.5 * blacks / 100` and white point `white_in = 1 - 0.5 * whites / 100`. Positive blacks lifts the blacks (flatter dark end), negative crushes them; positive whites brightens and saturates the whites, negative pulls them down. Out-of-range values clip.
 2. Exposure: multiply by `2 ** exposure`.
 3. Gamma: `x ** (1 / gamma)`.
 4. Shadows and highlights: add a smooth bump, `shadows * w_dark(x)` and `highlights * w_bright(x)`, where `w_dark` falls from 1 at black to 0 at mid-grey and `w_bright` rises from 0 at mid-grey to 1 at white. Positive shadows lifts the dark end; negative highlights recovers the bright end. These are global curves, so they cannot create halos.
