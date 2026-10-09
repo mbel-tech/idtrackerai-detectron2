@@ -5,8 +5,7 @@ thirteen numbers are not one long list. The three CLAHE and evenness sliders
 that existed before live here too; they are just more rows.
 """
 
-from qtpy.QtCore import Qt, Signal  # type: ignore[reportPrivateImportUsage]
-from qtpy.QtCore import QEvent
+from qtpy.QtCore import QEvent, Qt, Signal  # type: ignore[reportPrivateImportUsage]
 from qtpy.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -50,7 +49,9 @@ class _ValueSlider(QWidget):
         self.slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.label = QLabel()
         self.label.setMinimumWidth(40)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
 
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)

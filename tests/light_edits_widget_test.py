@@ -55,7 +55,9 @@ def test_reset_all_returns_to_no_change(widget):
     widget.groups.sliders["exposure"].setValue(1.5)
     widget.groups.resetAll()
     got = widget.groups.values()
-    assert {k: got[k] for k in LIGHT_KEYS} == {k: fp.DEFAULT_SETTINGS[k] for k in LIGHT_KEYS}
+    assert {k: got[k] for k in LIGHT_KEYS} == {
+        k: fp.DEFAULT_SETTINGS[k] for k in LIGHT_KEYS
+    }
 
 
 def test_reset_all_button_commits(widget):
@@ -82,10 +84,16 @@ def test_set_settings_selects_a_preset_only_on_full_match(widgets, widget):
 
 
 def test_old_settings_without_light_edits_load(widget):
-    widget.setSettings({
-        "clahe_clip": 1.5, "clahe_tile": 8, "illumination_sigma": 25.0,
-        "illumination_downsample": 4, "correct_lighting": True, "enhance": True,
-    })
+    widget.setSettings(
+        {
+            "clahe_clip": 1.5,
+            "clahe_tile": 8,
+            "illumination_sigma": 25.0,
+            "illumination_downsample": 4,
+            "correct_lighting": True,
+            "enhance": True,
+        }
+    )
     assert widget.preset.currentText() == "Standard"
 
 
@@ -97,7 +105,9 @@ def test_groups_are_collapsible(widget):
         assert sliders
         for want_open in (False, True):
             toggle.setChecked(want_open)
-            assert all(groups.sliders[k].isVisibleTo(groups) == want_open for k in sliders)
+            assert all(
+                groups.sliders[k].isVisibleTo(groups) == want_open for k in sliders
+            )
     groups.toggles["Tone"].setChecked(False)
     widget.setSettings({**fp.DEFAULT_SETTINGS, "shadows": 40})
     assert not groups.toggles["Tone"].isChecked()
