@@ -16,7 +16,7 @@ Usage
 Install (Colab, CUDA runtime)::
 
     pip install 'torch>=2.1' torchvision --index-url https://download.pytorch.org/whl/cu121
-    pip install 'git+https://github.com/facebookresearch/detectron2.git'
+    pip install --no-build-isolation 'git+https://github.com/facebookresearch/detectron2.git'
 
 Detectron2 has no universal wheel; it builds against the installed torch/CUDA
 pair, so install torch first and let detectron2 compile against it.
@@ -27,21 +27,43 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from .errors import DatasetError
+except ImportError:  # loaded by path, without the package around it
+    from errors import DatasetError  # type: ignore[no-redef]
+
+
+def _load_coco(annotation_file: Path, key: str):
+    """One top-level key of a COCO file, or a DatasetError saying what is wrong."""
+    try:
+        data = json.loads(annotation_file.read_text(encoding="utf-8"))
+        return data[key]
+    except (OSError, ValueError) as exc:
+        raise DatasetError(f"{annotation_file} could not be read as JSON: {exc}")
+    except (KeyError, TypeError):
+        raise DatasetError(f"{annotation_file} has no {key!r} entry; rebuild the dataset")
+
 
 def read_categories(annotation_file: Path) -> list[str]:
-    data = json.loads(annotation_file.read_text(encoding="utf-8"))
-    categories = sorted(data["categories"], key=lambda c: c["id"])
+    try:
+        categories = sorted(_load_coco(annotation_file, "categories"),
+                            key=lambda c: c["id"])
+        names = [c["name"] for c in categories]
+    except (KeyError, TypeError):
+        raise DatasetError(
+            f"{annotation_file} has categories without an id and name; rebuild the dataset"
+        )
     ids = [c["id"] for c in categories]
     if ids != list(range(1, len(ids) + 1)):
-        raise SystemExit(
+        raise DatasetError(
             f"{annotation_file} has category ids {ids}; they must run 1..N with no"
             " gaps for Detectron2's contiguous mapping to line up."
         )
-    return [c["name"] for c in categories]
+    return names
 
 
 def count_images(annotation_file: Path) -> int:
-    return len(json.loads(annotation_file.read_text(encoding="utf-8"))["images"])
+    return len(_load_coco(annotation_file, "images"))
 
 
 def main():
@@ -109,9 +131,12 @@ def main():
                 "upload the whole folder."
             )
 
-    class_names = read_categories(train_json)
-    n_train = count_images(train_json)
-    n_val = count_images(val_json)
+    try:
+        class_names = read_categories(train_json)
+        n_train = count_images(train_json)
+        n_val = count_images(val_json)
+    except DatasetError as exc:
+        raise SystemExit(str(exc))
     if n_train == 0:
         raise SystemExit("The training set is empty.")
 
@@ -129,10 +154,10 @@ def main():
     # Imported here so --help and the checks above work without detectron2.
     from detectron2 import model_zoo
     from detectron2.config import get_cfg
-    from detectron2.data import DatasetCatalog, MetadataCatalog, build_detection_test_loader
+    from detectron2.data import DatasetCatalog, MetadataCatalog
     from detectron2.data.datasets import register_coco_instances
     from detectron2.engine import DefaultTrainer
-    from detectron2.evaluation import COCOEvaluator, inference_on_dataset
+    from detectron2.evaluation import COCOEvaluator
     from detectron2.utils.logger import setup_logger
 
     setup_logger()
@@ -146,20 +171,35 @@ def main():
 
     if args.check_dataset:
         import cv2
+        import numpy as np
         from detectron2.utils.visualizer import Visualizer
 
         preview = args.output / "dataset_check"
         preview.mkdir(parents=True, exist_ok=True)
         metadata = MetadataCatalog.get("fish_train")
+        unreadable = []
         for record in DatasetCatalog.get("fish_train")[:8]:
-            image = cv2.imread(record["file_name"])
+            # fromfile+imdecode rather than imread, so non-ASCII paths work
+            try:
+                image = cv2.imdecode(
+                    np.fromfile(record["file_name"], dtype=np.uint8), cv2.IMREAD_COLOR
+                )
+            except OSError:
+                image = None
+            if image is None:
+                unreadable.append(record["file_name"])
+                continue
             drawn = Visualizer(image[:, :, ::-1], metadata=metadata, scale=1.0)
             out = drawn.draw_dataset_dict(record)
-            cv2.imwrite(
-                str(preview / Path(record["file_name"]).name),
-                out.get_image()[:, :, ::-1],
+            target = preview / Path(record["file_name"]).name
+            cv2.imencode(target.suffix or ".png", out.get_image()[:, :, ::-1])[1].tofile(
+                str(target)
             )
         print(f"\nWrote annotated samples to {preview}")
+        if unreadable:
+            print(f"\n{len(unreadable)} image(s) could not be read:")
+            for name in unreadable:
+                print(f"  {name}")
         print("Check that every animal is outlined before spending GPU time.")
         return
 
@@ -173,7 +213,13 @@ def main():
     cfg.SOLVER.IMS_PER_BATCH = args.batch_size
     cfg.SOLVER.BASE_LR = args.lr
     cfg.SOLVER.MAX_ITER = iterations
-    cfg.SOLVER.STEPS = (int(iterations * 0.7), int(iterations * 0.9))
+    # warm-up and LR drops must fit inside short runs: a fixed 1000-iteration
+    # warm-up would never finish in a 50-iteration test, and rounded steps can
+    # collide or land past the end
+    cfg.SOLVER.WARMUP_ITERS = min(1000, max(1, iterations // 10))
+    step1 = max(1, int(iterations * 0.7))
+    step2 = max(step1 + 1, int(iterations * 0.9))
+    cfg.SOLVER.STEPS = tuple(s for s in (step1, step2) if s < iterations)
     cfg.SOLVER.CHECKPOINT_PERIOD = max(iterations // 5, 1)
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(class_names)
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128
@@ -190,14 +236,10 @@ def main():
 
     trainer = Trainer(cfg)
     trainer.resume_or_load(resume=args.resume)
-    trainer.train()
-
-    results = {}
-    if n_val:
-        cfg.MODEL.WEIGHTS = str(args.output / "model_final.pth")
-        evaluator = COCOEvaluator("fish_val", output_dir=str(args.output))
-        loader = build_detection_test_loader(cfg, "fish_val")
-        results = inference_on_dataset(trainer.model, loader, evaluator)
+    # DefaultTrainer evaluates once when training ends and returns that result,
+    # so evaluating again here would just repeat it
+    results = trainer.train() or {}
+    if results:
         print("\nValidation results:")
         for task, metrics in results.items():
             for metric, value in metrics.items():
@@ -215,7 +257,12 @@ def main():
     ):
         if not candidate.is_file():
             continue
-        data = json.loads(candidate.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"{candidate} could not be read as JSON: {exc}")
+        if not isinstance(data, dict):
+            continue
         found = data.get("enhancement", data if "clahe_clip" in data else None)
         # a recorded null means "no record", not "enhancement is None"
         if found:
