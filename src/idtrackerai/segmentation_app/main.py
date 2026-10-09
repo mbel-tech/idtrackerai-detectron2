@@ -1,6 +1,10 @@
 # Each Qt binding is different, so...
 # pyright: reportIncompatibleMethodOverride=false
+import importlib.util
+import json
 import logging
+import numbers
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -130,6 +134,9 @@ class SegmentationGUI(GUIBase):
         self.open_widget.new_parameters.connect(self.new_parameters)
         self.open_widget.video_paths_reordered.connect(
             self.videoPlayer.reorder_video_paths
+        )
+        self.open_widget.video_paths_reordered.connect(
+            lambda _paths: self.enhancement_preview.bump_generation()
         )
         self.open_widget.video_paths_reordered.connect(
             lambda paths: self.session_name.setPlaceholderText(
@@ -311,9 +318,7 @@ class SegmentationGUI(GUIBase):
         A background model computed from differently enhanced frames is stale,
         so it is discarded rather than compared against the new ones.
         """
-        self.bkg_widget.bkg_thread.enhancement = settings
-        self.bkg_widget.bkg_thread.bkg = None
-        self.bkg_widget.bkg_thread.frame_stack = None
+        self.bkg_widget.enhancement_changed(settings)
         self.detectron2_panel.enhancement_committed(settings)
         self.sam3_panel.enhancement_committed(settings)
 
@@ -414,6 +419,21 @@ class SegmentationGUI(GUIBase):
     def close_and_track_video(self):
         """Action when clicked "close and track video".
         It gathers widgets parameters, writes them in self.user_params and exits"""
+        if importlib.util.find_spec("torch") is None:
+            # tracking starts after this window closes, and it needs PyTorch.
+            # Without it the app would just vanish, with the reason only in the log
+            QMessageBox.critical(
+                self,
+                "PyTorch is not installed",
+                "Tracking needs PyTorch, which is missing from this environment."
+                " Install it, then try again:\n\n"
+                f'  "{sys.executable}" -m pip install torch torchvision\n\n'
+                "(add  --index-url https://download.pytorch.org/whl/cpu  for a"
+                " CPU-only build). Your settings are still here: use 'Save"
+                " parameters' to keep them.",
+            )
+            return
+
         parameters = self.out_parameters()
         if self.unacceptable_parameters(parameters):
             return
@@ -425,6 +445,9 @@ class SegmentationGUI(GUIBase):
         # Otherwise switching back to thresholding would silently keep tracking
         # from a contour file loaded earlier.
         self.session.external_contours = self.segmentation_source.value()
+        # same reason: out_parameters leaves enhancement out when it is off, so
+        # a value loaded from a .toml would otherwise outlive choosing "None"
+        self.session.enhancement = parameters.get("enhancement")
         bkg = self.bkg_widget.getBkg()
         if bkg is not None:
             tmp_bkg_path = Path(self.session.video_paths[0]).with_suffix(
@@ -532,9 +555,15 @@ class SegmentationGUI(GUIBase):
         if not fileName:
             return
 
-        with open(fileName, "w", encoding="utf_8") as file:
-            for key, value in parameters.items():
-                file.write(f"{key} = {toml_format(value)}\n")
+        # format everything before opening the file, so a failure cannot leave
+        # a truncated .toml behind
+        try:
+            text = "".join(
+                f"{key} = {toml_format(value)}\n" for key, value in parameters.items()
+            )
+            Path(fileName).write_text(text, encoding="utf_8")
+        except (OSError, ValueError, TypeError) as exc:
+            QMessageBox.warning(self, "Could not save the parameters", str(exc))
 
     def new_video_paths(
         self,
@@ -547,6 +576,9 @@ class SegmentationGUI(GUIBase):
         self.session_name.setPlaceholderText(
             "&".join(Path(path).stem for path in video_paths)
         )
+        # another video can have the same size, and the preview cache keys on
+        # frame number and shape only
+        self.enhancement_preview.bump_generation()
         self.ROI_Widget.set_video_size(video_size)
         self.segmentation_source.set_video_info(n_frames, video_size, video_paths)
         self.detectron2_panel.set_video_context(video_paths, self.session.output_dir)
@@ -592,22 +624,30 @@ def toml_format(value: Any, width: int = 50) -> str:
     """
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, (int, float, str)):
-        return repr(value)
+    if isinstance(value, numbers.Integral):
+        return repr(int(value))
+    if isinstance(value, numbers.Real):
+        return repr(float(value))  # inf and nan are valid TOML floats
+    if isinstance(value, (str, Path)):
+        # a JSON string is a valid TOML basic string. repr() would write a
+        # literal one, which keeps the doubled backslashes of a Windows path
+        # and cannot hold a string with both kinds of quote
+        return json.dumps(str(value), ensure_ascii=False)
     if value is None:
         return '""'
+    if isinstance(value, dict):
+        # list(dict) would keep only the keys and silently lose the values
+        items = ", ".join(f"{k} = {toml_format(v)}" for k, v in value.items())
+        return "{ " + items + " }" if items else "{}"
     if not value:
         return "[]"
-    value = list(value)
 
-    if len(repr(value)) < width:
-        return repr(value)
+    items = [toml_format(item) for item in value]
+    one_line = "[" + ", ".join(items) + "]"
+    if len(one_line) < width:
+        return one_line
 
-    s = "[\n"
-    for item in value:
-        s += f"    {repr(item)},\n"
-    s += "]"
-    return s
+    return "[\n" + "".join(f"    {item},\n" for item in items) + "]"
 
 
 class SessionName(QLineEdit):

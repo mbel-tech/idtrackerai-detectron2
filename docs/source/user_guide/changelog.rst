@@ -110,6 +110,18 @@ Segmentation changes
   Detectron2 into the GUI process. The export is handed over as a command,
   because roughly an hour per 30 000-frame clip means days over a collection.
   Colab is now the fallback for machines without a GPU rather than the route.
+- The Colab notebook carries a project from the annotated frames to the end:
+  it builds the COCO dataset, trains, exports one contour file per clip, and
+  writes one idtracker.ai parameter file per recording. Those files inherit
+  the configuration saved by the Segmentation App, so the animal count, area
+  thresholds, region of interest and tracking interval carry over rather than
+  being retyped. Its sections are numbered 4 to 12, continuing from the app's
+  steps 1 to 3 -- enhancement, sampling and annotating, which stay there
+  because each needs eyes on the footage, and because LabelMe cannot run on a
+  runtime with no display. A section that tracks on the runtime is included
+  and marked as untested there.
+- New **Get Colab bundle...** button on the annotate step, which writes the
+  bundle and lists what else to put on Drive.
 - New ``idtrackerai_d2_install_gpu`` command, and a button in step 5, that
   installs PyTorch and Detectron2 for the machine they run on: the GPU and its
   CUDA version are detected, the matching PyTorch index is chosen and checked
@@ -140,6 +152,18 @@ Segmentation changes
   ``idtrackerai.extra_tools.detectron2_pipeline``, so the GUI and the command
   line run the same code. Every stage is also an installed
   ``idtrackerai_d2_*`` command.
+
+Documentation changes
+---------------------
+
+- New ``USER_GUIDE.md``: an illustrated guide for someone who has not tracked
+  an animal before, covering the vocabulary, installation, a first run by
+  thresholding, what its failure looks like on real footage, the Detectron2
+  route both locally and in Colab, tracking from external contours, and the
+  Validator.
+- New ``docs/make_screenshots.py``, which drives the Segmentation App offscreen
+  to regenerate every screenshot in that guide, so the images can be refreshed
+  when the interface changes.
 
 Packaging changes
 -----------------

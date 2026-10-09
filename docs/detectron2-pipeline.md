@@ -25,13 +25,19 @@ thresholds to tune.
     7  track              external_contours = one .h5 per clip of the session
 ```
 
-Steps 1–4 are in the GUI and run anywhere. Steps 5–6 need a CUDA GPU: the panel
-checks whether this machine has one, runs training here when it does, and hands
-over the export as a command, since a collection takes days and that does not
-belong behind a window you cannot close. When there is no GPU,
-`idtrackerai_d2_bundle` packages the Colab notebook. Colab is the fallback, not
-the route — uploading tens of gigabytes of video to a hosted runtime makes
-little sense when the card is already in the machine.
+There are two ways through this, and which is better depends on one thing: do
+you have a CUDA card?
+
+**With one**, the Segmentation App does steps 1–4 and runs training itself; it
+checks for the card rather than assuming, and hands over the export as a
+command, since a collection takes days and that does not belong behind a window
+you cannot close. Nothing leaves the machine.
+
+**Without one** — which is the common case for people tracking animals — the
+app still does steps 1 to 3, and the Colab notebook takes over from your
+annotated frames. The **Get Colab bundle...** button hands you the notebook at
+exactly that point. Uploading the clips is the price, and it buys a GPU you do
+not have.
 
 **A recording saved in several clips is tracked as one session.** Give
 `external_contours` one file per video path, in the same order; the Segmentation
@@ -49,14 +55,52 @@ predicting on raw ones costs accuracy without raising an error. The settings are
 written beside the frames, copied into the dataset, recorded with the weights,
 and adopted by the exporter unless you override them.
 
+## The Colab notebook, for a machine without a CUDA card
+
+Steps 1 to 3 happen in the Segmentation App, because each wants your eyes on
+the footage: judging the enhancement, seeing how the frames are spread across
+the clips, and drawing the polygons. Step 3 is also the one step that could
+never move -- LabelMe is a desktop application and a runtime has no display.
+
+When you have finished annotating, the app's **Get Colab bundle...** button on
+the Annotate step writes `colab_bundle.zip`, and tells you what else to put on
+Drive. The notebook inside it is **steps 4 to 12**:
+
+```
+  app     1-3   enhancement, sample frames, annotate in LabelMe
+                        |
+  Colab   4-5   your annotated frames -> the COCO dataset
+          6-8   install Detectron2, check the dataset, train
+          9-10  export one contour file per clip, check them
+         11-12  one parameter file per recording, then track
+```
+
+The two *Setup* sections before step 4 are not pipeline steps: they mount
+Drive, unpack the bundle and locate the videos, and you run them at the start
+of each session. Everything between sittings lives on Drive, so closing the tab
+costs nothing.
+
+The parameter files it writes for tracking **inherit whatever the Segmentation
+App saved** - the file from *Save parameters*, the same one a legacy
+thresholding run would use - so the number of animals, the area thresholds, the
+region of interest and the tracking interval carry over instead of being
+retyped. One file per recording, with its clips and their contour files in
+matching order.
+
+Tracking on the Colab runtime is offered but **has not been run there**; the
+notebook says so where it matters, and the same parameter files work unchanged
+on your own machine.
+
 ## From the Segmentation App
 
 The shortest route. Open a video, then set **Segmentation → Detectron2
 pipeline**:
 
-1. **Enhancement** — Off / CLAHE / CLAHE + even lighting, previewed live on the
-   frame you are looking at. Drag the raw↔enhanced slider to compare. Save it as
-   this setup's profile.
+1. **Enhancement** — a preset (None / Gentle / Standard / Strong), or Custom for
+   the individual light edits (exposure, brightness, contrast, gamma, shadows,
+   highlights, blacks, whites, sharpness, denoise) alongside local contrast and
+   lighting evenness, previewed live on the frame you are looking at. Drag the
+   raw↔enhanced slider to compare. Save it as this setup's profile.
 2. **Sample frames** — the videos to draw from, how many frames, the selection
    number, the output folder. Runs in the background with a cancellable progress
    bar; a cancelled run keeps the frames it wrote.
@@ -76,12 +120,16 @@ pipeline**:
    and `--validate-label exact` so a typo cannot create a second class. The step
    header counts annotated frames.
 4. **Build dataset** — validates every polygon and shows the report inline.
+   Only needed if you are training on this machine; the Colab notebook builds
+   it for you otherwise.
 
 Close the app whenever you like. Each step records what it produced beside the
 data, and status is re-derived from disk on reload, so a deleted folder shows as
 incomplete rather than as a step that lies about being done.
 
-Then upload the dataset and your videos to Drive and open the notebook.
+If this machine has no CUDA card, use **Get Colab bundle...** on the Annotate
+step once the polygons are drawn. It writes the zip and lists what else to put
+on Drive.
 
 ## From the command line
 

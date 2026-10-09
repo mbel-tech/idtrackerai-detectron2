@@ -14,6 +14,7 @@ stratifying guarantees coverage of the whole recording, including whatever the
 lighting does halfway through.
 """
 
+import glob
 import json
 import random
 from collections.abc import Callable, Sequence
@@ -25,10 +26,22 @@ import cv2
 
 try:
     from .errors import SamplingError
-    from .preprocessing import make_enhancer_from, save_profile
+    from .preprocessing import (
+        DEFAULT_SETTINGS,
+        SETTING_KEYS,
+        load_profile,
+        make_enhancer_from,
+        save_profile,
+    )
 except ImportError:  # loaded by path, without the package around it
     from errors import SamplingError  # type: ignore[no-redef]
-    from preprocessing import make_enhancer_from, save_profile  # type: ignore[no-redef]
+    from preprocessing import (  # type: ignore[no-redef]
+        DEFAULT_SETTINGS,
+        SETTING_KEYS,
+        load_profile,
+        make_enhancer_from,
+        save_profile,
+    )
 
 
 @dataclass
@@ -199,7 +212,8 @@ def resolve_videos(patterns: Sequence[Path]) -> list[Path]:
     videos: list[Path] = []
     for pattern in patterns:
         if any(ch in str(pattern) for ch in "*?"):
-            videos.extend(sorted(pattern.parent.glob(pattern.name)))
+            # glob.glob on the whole pattern, so wildcards in folder names work
+            videos.extend(Path(m) for m in sorted(glob.glob(str(pattern))))
         else:
             videos.append(Path(pattern))
     return [v for v in videos if v.is_file() and not _is_sidecar(v)]
@@ -250,6 +264,49 @@ def plan_sampling(
             VideoPlan(video, available, requested, indices, readable=available > 0)
         )
     return plans
+
+
+def recorded_enhancement(output: Path) -> dict | None:
+    """The enhancement settings a frames folder was already sampled with, if any."""
+    profile = output / "preprocess_profile.json"
+    try:
+        if profile.is_file():
+            return load_profile(profile)
+        manifest = output / "sampling_manifest.json"
+        if manifest.is_file():
+            found = json.loads(manifest.read_text(encoding="utf-8")).get("enhancement")
+            return found if isinstance(found, dict) and found else None
+    except Exception:  # unreadable, or a PreprocessingError from a bad profile
+        return None
+    return None
+
+
+def check_enhancement_unchanged(output: Path, settings: dict) -> None:
+    """Refuses to mix frames enhanced differently into one folder.
+
+    The profile beside the frames is overwritten by every run, so frames sampled
+    under different settings would end up under a profile that describes only
+    the last batch, and training would then record settings that are wrong for
+    the rest.
+    """
+    recorded = recorded_enhancement(output)
+    if not recorded:
+        return
+    differences = [
+        f"{key}: folder has {recorded.get(key, DEFAULT_SETTINGS[key])!r}, now {settings[key]!r}"
+        for key in SETTING_KEYS
+        if key in settings and recorded.get(key, DEFAULT_SETTINGS[key]) != settings[key]
+    ]
+    if differences:
+        raise SamplingError(
+            f"{output} already holds frames enhanced differently from these"
+            " settings:\n  "
+            + "\n  ".join(differences)
+            + "\nMixing them would make the folder's profile wrong for some"
+            " frames. Sample into a new folder, run without enhancement flags to"
+            " reuse the folder's own profile, or pass --force-new-enhancement"
+            " to record the new settings anyway."
+        )
 
 
 def _merge_manifest(path: Path, manifest: dict, output: Path) -> dict:
@@ -313,6 +370,7 @@ def sample_frames(
     progress: Callable[[int], None] | None = None,
     abort: Callable[[], bool] | None = None,
     counts: Sequence[int] | None = None,
+    force_new_enhancement: bool = False,
 ) -> SamplingResult:
     """Writes enhanced frames for annotation, plus a manifest and a profile.
 
@@ -323,10 +381,17 @@ def sample_frames(
     That is a deliberate departure from the background-computation thread this
     otherwise mirrors, which discards partial results: two hundred annotated
     frames are genuinely useful, an incomplete background model is not.
+
+    Sampling into a folder that already holds frames enhanced with different
+    settings raises :class:`SamplingError` unless ``force_new_enhancement``.
     """
     videos = list(videos)
+    if image_format not in ("png", "jpg"):
+        raise SamplingError(f"Unsupported image format {image_format!r}")
     check_distinct_stems(videos)
     plans = plan_sampling(videos, n_frames, seed, even, uniform_random, counts)
+    if not force_new_enhancement:
+        check_enhancement_unchanged(output, settings)
     output.mkdir(parents=True, exist_ok=True)
     enhance = make_enhancer_from(settings)
 
@@ -338,62 +403,89 @@ def sample_frames(
     unreadable: list[str] = [p.video.name for p in plans if not p.readable]
     complete = True
 
-    for plan in plans:
-        if plan.requested == 0:
-            continue
-
-        cap = cv2.VideoCapture(str(plan.video))
-        written = 0
-        for index in plan.indices:
-            if abort is not None and abort():
-                complete = False
-                break
-
-            cap.set(cv2.CAP_PROP_POS_FRAMES, index)
-            ok, frame = cap.read()
-            if not ok:
-                unreadable.append(f"{plan.video.name}:{index}")
-                continue
-
-            image = enhance(frame)
-            name = f"{plan.video.stem}_f{index:06d}.{image_format}"
-            # imencode+tofile rather than imwrite, so non-ASCII paths work
-            cv2.imencode(f".{image_format}", image)[1].tofile(str(output / name))
-            records.append(
-                {
-                    "file_name": name,
-                    # the stem, matching how the frames are named and how the
-                    # dataset step derives a source from a file name when no
-                    # manifest covers it; storing the name with its extension
-                    # made one clip look like two different recordings
-                    "source_video": plan.video.stem,
-                    "source_path": str(plan.video),
-                    "frame_number": index,
-                    "width": image.shape[1],
-                    "height": image.shape[0],
-                }
-            )
-            written += 1
-            if progress is not None:
-                progress(len(records))
-
-        cap.release()
-        per_video[plan.video.name] = written
-        if not complete:
-            break
-
     result = SamplingResult(
         frames=records,
         requested=n_frames,
         output=output,
         per_video=per_video,
         unreadable=unreadable,
-        complete=complete,
     )
 
-    if not records:
-        return result
+    # The manifest is written in the finally, so frames already on disk stay
+    # recorded when a write fails or the run is interrupted part-way.
+    finished = False
+    try:
+        for plan in plans:
+            if plan.requested == 0:
+                continue
 
+            cap = cv2.VideoCapture(str(plan.video))
+            written = 0
+            try:
+                for index in plan.indices:
+                    if abort is not None and abort():
+                        complete = False
+                        break
+
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, index)
+                    ok, frame = cap.read()
+                    if not ok:
+                        unreadable.append(f"{plan.video.name}:{index}")
+                        continue
+
+                    image = enhance(frame)
+                    name = f"{plan.video.stem}_f{index:06d}.{image_format}"
+                    # imencode+tofile rather than imwrite, so non-ASCII paths work
+                    encoded, buffer = cv2.imencode(f".{image_format}", image)
+                    if not encoded:
+                        raise SamplingError(
+                            f"Could not encode frame {index} of {plan.video.name}"
+                            f" as {image_format}"
+                        )
+                    buffer.tofile(str(output / name))
+                    records.append(
+                        {
+                            "file_name": name,
+                            # the stem, matching how the frames are named and how
+                            # the dataset step derives a source from a file name
+                            # when no manifest covers it; storing the name with
+                            # its extension made one clip look like two different
+                            # recordings
+                            "source_video": plan.video.stem,
+                            "source_path": str(plan.video),
+                            "frame_number": index,
+                            "width": image.shape[1],
+                            "height": image.shape[0],
+                        }
+                    )
+                    written += 1
+                    if progress is not None:
+                        progress(len(records))
+            finally:
+                cap.release()
+                per_video[plan.video.name] = written
+            if not complete:
+                break
+        finished = True
+    finally:
+        result.complete = complete and finished
+        if records:
+            _write_manifest(
+                result, videos, settings, seed, even, uniform_random, image_format
+            )
+    return result
+
+
+def _write_manifest(
+    result: SamplingResult,
+    videos: Sequence[Path],
+    settings: dict,
+    seed: int,
+    even: bool,
+    uniform_random: bool,
+    image_format: str,
+) -> None:
+    output, records, complete = result.output, result.frames, result.complete
     created = datetime.now(timezone.utc).isoformat(timespec="seconds")
     batch = {
         "created": created,
@@ -402,6 +494,7 @@ def sample_frames(
         "allocation": "even" if even else "proportional",
         "complete": complete,
         "enhancement": settings,
+        "image_format": image_format,
         "videos": [str(v) for v in videos],
     }
     for record in records:
@@ -415,6 +508,7 @@ def sample_frames(
         "complete": complete,
         # kept at the top level because read_enhancement() looks for it here
         "enhancement": settings,
+        "image_format": image_format,
         "videos": batch["videos"],
         "batches": [batch],
         "frames": records,
@@ -425,11 +519,11 @@ def sample_frames(
 
     # The settings live beside the frames as a reusable profile, so the same
     # recording setup can be prepared identically next time, and so the
-    # conversion step can carry them on towards training.
+    # conversion step can carry them on towards training. The image format is
+    # recorded in the manifest only: profiles reject keys they do not know.
     result.profile_path = save_profile(
         output / "preprocess_profile.json",
         settings,
         name=output.name,
         notes="Written by the sampling step; reuse with --preprocess-profile",
     )
-    return result

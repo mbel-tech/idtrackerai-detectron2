@@ -1,11 +1,9 @@
 import logging
 
-import cv2
-
 from idtrackerai import IdtrackeraiError, ListOfBlobs, Session
 from idtrackerai.utils import create_dir, remove_dir
 
-from .external_contours import validate_against_video
+from .external_contours import close_all, validate_against_video
 from .segmentation import compute_background, load_custom_background, segment
 
 
@@ -23,14 +21,14 @@ def animals_detection_API(session: Session) -> ListOfBlobs:
         # Per-clip frame counts, so a file that does not line up is named
         # along with its video rather than showing only as a wrong total.
         # A wrong ORDER sums correctly, and this is what catches it.
-        per_video_frames = None
-        try:
-            per_video_frames = [
-                int(cv2.VideoCapture(str(path)).get(cv2.CAP_PROP_FRAME_COUNT))
-                for path in session.video_paths
-            ]
-        except Exception:  # noqa: BLE001 - the totals check still applies
-            logging.debug("Could not read per-video frame counts", exc_info=True)
+        # Counted once, by Session.prepare_tracking, rather than re-opening
+        # every video here (and leaking the captures).
+        per_video_frames = getattr(session, "video_paths_n_frames", None)
+        if per_video_frames is None:
+            logging.warning(
+                "Per-video frame counts are unavailable; external contours are"
+                " only checked against the total number of frames"
+            )
 
         validate_against_video(
             session.external_contours,
@@ -51,6 +49,21 @@ def animals_detection_API(session: Session) -> ListOfBlobs:
                 "Background subtraction is disabled: external contours are in use"
             )
     elif session.use_bkg:
+        if bkg_model is not None:
+            matches = session.background_matches_enhancement()
+            if matches is False:
+                logging.warning(
+                    "The saved background model was built with a different frame"
+                    " enhancement than the current one. Recomputing it."
+                )
+                bkg_model = None
+            elif matches is None and session.effective_enhancement():
+                logging.warning(
+                    "The saved background model has no record of the enhancement"
+                    " it was built with, so it cannot be checked against the"
+                    " current one. Delete it to force recomputing."
+                )
+
         if bkg_model is None:
             stat = session.background_subtraction_stat
             if stat.lower() in ("median", "mean", "max", "min"):
@@ -64,7 +77,9 @@ def animals_detection_API(session: Session) -> ListOfBlobs:
                     enhancement=session.enhancement,
                 )
             else:
-                bkg_model = load_custom_background(stat, session.video_paths[0])
+                bkg_model = load_custom_background(
+                    stat, session.video_paths[0], session.enhancement
+                )
             session.bkg_model = bkg_model
         else:
             logging.info("Using previously computed background model from GUI")
@@ -78,20 +93,24 @@ def animals_detection_API(session: Session) -> ListOfBlobs:
         logging.info("No background model computed")
 
     # Main call
-    blobs_in_video = segment(
-        {
-            "intensity_ths": session.intensity_ths,
-            "area_ths": session.area_ths,
-            "ROI_mask": session.ROI_mask,
-            "bkg_model": bkg_model,
-            "external_contours": session.external_contours,
-            "enhancement": session.enhancement,
-        },
-        session.episodes,
-        None if session.bounding_box_images_in_ram else session.bbox_images_folder,
-        session.number_of_frames,
-        session.number_of_parallel_workers,
-    )
+    try:
+        blobs_in_video = segment(
+            {
+                "intensity_ths": session.intensity_ths,
+                "area_ths": session.area_ths,
+                "ROI_mask": session.ROI_mask,
+                "bkg_model": bkg_model,
+                "external_contours": session.external_contours,
+                "enhancement": session.enhancement,
+            },
+            session.episodes,
+            None if session.bounding_box_images_in_ram else session.bbox_images_folder,
+            session.number_of_frames,
+            session.number_of_parallel_workers,
+        )
+    finally:
+        # with n_jobs == 1 the contour files were opened in this process
+        close_all()
 
     list_of_blobs = ListOfBlobs(blobs_in_video)
     assert len(list_of_blobs) == session.number_of_frames

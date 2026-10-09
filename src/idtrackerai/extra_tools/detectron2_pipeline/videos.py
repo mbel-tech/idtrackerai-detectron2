@@ -19,6 +19,7 @@ Usage
 """
 
 import argparse
+import glob
 from collections import Counter
 from pathlib import Path
 
@@ -92,7 +93,8 @@ def main():
     videos: list[Path] = []
     for pattern in args.videos:
         if any(ch in str(pattern) for ch in "*?"):
-            videos.extend(sorted(pattern.parent.glob(pattern.name)))
+            # glob.glob on the whole pattern, so wildcards in folder names work
+            videos.extend(Path(m) for m in sorted(glob.glob(str(pattern))))
         else:
             videos.append(pattern)
     # macOS "._name.mp4" companions match any *.mp4 glob and are not videos
@@ -127,7 +129,7 @@ def main():
     good = [i for i in results if not i["problems"]]
 
     sizes = Counter((i["width"], i["height"]) for i in good)
-    names = Counter(i["name"] for i in results)
+    names = Counter(i["path"].stem for i in results)
     duplicates = [n for n, c in names.items() if c > 1]
 
     total_frames = sum(i["frames"] for i in good)

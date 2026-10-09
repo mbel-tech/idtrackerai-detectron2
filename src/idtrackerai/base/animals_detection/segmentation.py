@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import Callable, Sequence
 from io import BytesIO
@@ -162,20 +163,23 @@ def get_blobs_in_frame(
     return blobs_in_frame
 
 
+def normalize_enhancement(enhancement: dict | None) -> dict | None:
+    """Completes a partial enhancement dict from the defaults. Unknown keys raise
+    an IdtrackeraiError naming them, instead of a KeyError in a pool worker."""
+    try:
+        return fp.normalize_settings(enhancement)
+    except fp.PreprocessingError as exc:
+        raise IdtrackeraiError(str(exc)) from exc
+
+
 def apply_enhancement(frame: np.ndarray, enhancement: dict) -> np.ndarray:
     """Grayscale plus the configured enhancement, in one place.
 
     Used by segmentation, by the background model and by the GUI preview, so
     all three agree on what the image looks like.
     """
-    return fp.enhance(
-        frame,
-        clahe_clip=enhancement["clahe_clip"],
-        clahe_tile=enhancement["clahe_tile"],
-        downsample=enhancement["illumination_downsample"],
-        sigma=enhancement["illumination_sigma"],
-        correct_lighting=enhancement["correct_lighting"],
-    )
+    enhancement = normalize_enhancement(enhancement)
+    return fp.enhance_with_settings(frame, enhancement)
 
 
 def process_frame(
@@ -200,8 +204,9 @@ def process_frame(
     if external_contours is not None:
         # Contours come from an external instance-segmentation model. The frame
         # is still returned as usual: it is the source of the bounding box
-        # images, so identification images keep the video's own pixels, masked
-        # by the external contour instead of by a threshold.
+        # images, so identification images are cut from this same (enhanced,
+        # when enhancement is on) frame, masked by the external contour instead
+        # of by a threshold.
         return contours_from_external(
             external_contours, frame_number, area_ths, ROI_mask, frame
         )
@@ -469,7 +474,9 @@ def compute_background(
 
 
 def load_custom_background(
-    path: str, example_video_path: Path | str | None = None
+    path: str,
+    example_video_path: Path | str | None = None,
+    enhancement: dict | None = None,
 ) -> np.ndarray:
     logging.info(f"Loading custom background from {path}")
     try:
@@ -482,9 +489,48 @@ def load_custom_background(
             " image file."
         ) from exc
 
-    if example_video_path is None:
-        return bkg
+    if example_video_path is not None:
+        check_background_shape(bkg, example_video_path)
 
+    # Frames are enhanced before the comparison, so a user's image must be too.
+    # The exception is a background the apps saved themselves: it was built from
+    # enhanced frames and says so in a sidecar. CLAHE is not idempotent, so
+    # enhancing it again would no longer match the frames.
+    active = (
+        normalize_enhancement(enhancement)
+        if enhancement and enhancement.get("enhance", True)
+        else None
+    )
+    recorded = _recorded_background_enhancement(path)
+    if isinstance(recorded, dict):
+        # A sidecar written before a setting existed lacks that key.
+        recorded = normalize_enhancement(recorded)
+    if recorded is _NO_RECORD or recorded is None:
+        if active:
+            bkg = apply_enhancement(bkg, active)
+    elif recorded != active:
+        raise IdtrackeraiError(
+            f"The background {path} was saved with different enhancement settings"
+            " than the ones in use, and an enhanced image cannot be converted. "
+            "Compute the background again or choose a raw image."
+        )
+    return bkg
+
+
+_NO_RECORD = object()
+
+
+def _recorded_background_enhancement(path: str):
+    """What the sidecar next to a saved background says it was built with: the
+    settings, None for a raw image, or _NO_RECORD when there is no sidecar."""
+    try:
+        sidecar = Path(path).with_suffix(".enhancement.json")
+        return json.loads(sidecar.read_text(encoding="utf-8"))["enhancement"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return _NO_RECORD
+
+
+def check_background_shape(bkg: np.ndarray, example_video_path: Path | str) -> None:
     cap = cv2.VideoCapture(str(example_video_path))
     required_shape = (
         int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
@@ -499,8 +545,6 @@ def load_custom_background(
             f" ({example_video_path}). Please upload a background image with the"
             " correct dimensions."
         )
-
-    return bkg
 
 
 def to_gray_scale(frame: np.ndarray) -> np.ndarray:

@@ -176,6 +176,10 @@ class UndoManager:
         self.stack.append((description, snapshot))
         del self.stack[:-UNDO_DEPTH]
 
+    def clear(self) -> None:
+        """Forgets every edit; snapshots of a previous session are meaningless."""
+        self.stack.clear()
+
     def undo(self) -> None:
         if not self.stack:
             self.gui.light_popup.info("Undo", "Nothing to undo")
@@ -392,6 +396,22 @@ class SaveSessionObjects(QThread):
 
 class ValidationGUI(GUIBase):
     blobs: ListOfBlobs
+
+    _unsaved_changes = False
+    _edit_generation = 0
+    "Bumped by every edit, so a save can tell whether anything changed meanwhile."
+    _save_generation = 0
+    _save_silent = False
+
+    @property
+    def unsaved_changes(self) -> bool:
+        return self._unsaved_changes
+
+    @unsaved_changes.setter
+    def unsaved_changes(self, value: bool) -> None:
+        self._unsaved_changes = value
+        if value:
+            self._edit_generation += 1
 
     def __init__(self) -> None:
         super().__init__()
@@ -856,6 +876,8 @@ class ValidationGUI(GUIBase):
         autosave usable: a dialog stealing focus every five minutes in the
         middle of a click-heavy job would be worse than not autosaving.
         """
+        self._save_generation = self._edit_generation
+        self._save_silent = silent
         self.session.identities_labels = self.id_labels.get_labels()[1:]
         self.session.identities_colors = [
             c.name() for c in self.id_labels.get_colors()[0][1:]
@@ -869,6 +891,16 @@ class ValidationGUI(GUIBase):
             self.session, self.blobs, self, self.blobs_path, verbose=not silent
         )
         self.saving_session_thread = saving_thread
+
+        if silent:
+            # ListOfBlobs.save temporarily disconnects the blob graph, so it
+            # cannot run on a worker thread while the user keeps editing it.
+            # Doing it here, on the GUI thread, rules out concurrent edits.
+            saving_thread.run()
+            self.report_save_failure()
+            self._start_save_trajectories(silent=True)
+            return
+
         saving_thread.finished.connect(self.report_save_failure)
         saving_thread.finished.connect(
             lambda: self._start_save_trajectories(silent=silent)
@@ -901,6 +933,22 @@ class ValidationGUI(GUIBase):
         """
         thread = self.saving_session_thread
         if thread is None or thread.success:
+            return
+
+        if self._save_silent:
+            # The autosave timer must never pop a blocking dialog: log it, flag
+            # it in the title, and wait longer before the next attempt.
+            logging.error(
+                "Autosave failed: %s. %s",
+                thread.error_message,
+                f"A copy was saved at {thread.backup_path}"
+                if thread.backup_path
+                else "No backup could be written either",
+            )
+            self.setWindowTitle("Validator (AUTOSAVE FAILED, save manually)")
+            self.autosave_timer.setInterval(
+                min(2 * self.autosave_timer.interval(), 60 * 60 * 1000)
+            )
             return
 
         if thread.backup_path is None:
@@ -952,7 +1000,11 @@ class ValidationGUI(GUIBase):
 
     def finish_saving(self) -> None:
         if self.save_thread is not None and self.save_thread.success:
-            self.unsaved_changes = False
+            # Edits made while saving are not in what was written
+            if self._edit_generation == self._save_generation:
+                self.unsaved_changes = False
+            self.autosave_timer.setInterval(AUTOSAVE_INTERVAL_MS)
+            self.setWindowTitle("Validator")
 
     def check_unsaved_changes(self) -> None | QMessageBox.StandardButton:
         if not self.unsaved_changes:
@@ -1041,6 +1093,7 @@ class ValidationGUI(GUIBase):
         session = self.session
 
         self.blobs_path = loading_thread.loaded_from
+        self.undo_manager.clear()
 
         # remove selection
         self.selected_blob = None
@@ -1369,8 +1422,9 @@ class ValidationGUI(GUIBase):
         if not merges:
             self.light_popup.info(
                 "Nothing to merge",
-                "No frame in this range has two separate blobs carrying"
-                f" identities {sorted(identities_to_merge)}.",
+                "Merging needs two separate blobs in the same frame, each carrying"
+                f" one of the identities {sorted(identities_to_merge)}. No frame"
+                " in this range has that.",
             )
             return
 

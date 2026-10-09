@@ -153,7 +153,7 @@ def source_video_of(file_name: str, manifest: dict | None) -> str:
     """Which clip a frame came from, for the group-aware split."""
     if manifest:
         entry = manifest.get(file_name)
-        if entry:
+        if entry and entry.get("source_video"):
             return normalise_source(entry["source_video"])
     # fall back to the naming the sampling step uses: <video stem>_f<number>.png
     stem = Path(file_name).stem
@@ -227,15 +227,35 @@ def read_enhancement(input_dir: Path) -> dict | None:
     """
     profile = input_dir / "preprocess_profile.json"
     if profile.is_file():
-        return {
-            k: v
-            for k, v in json.loads(profile.read_text(encoding="utf-8")).items()
-            if k not in ("name", "notes")
-        }
+        data = _read_json_object(profile)
+        return {k: v for k, v in data.items() if k not in ("name", "notes")}
     manifest = input_dir / "sampling_manifest.json"
     if manifest.is_file():
-        return json.loads(manifest.read_text(encoding="utf-8")).get("enhancement")
+        return _read_json_object(manifest).get("enhancement")
     return None
+
+
+def _read_json_object(path: Path) -> dict:
+    """A JSON file's top-level object, or a DatasetError saying what is wrong."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DatasetError(f"{path} could not be read as JSON: {exc}")
+    if not isinstance(data, dict):
+        raise DatasetError(f"{path} should contain a JSON object")
+    return data
+
+
+def _image_name_of(data: dict, json_path: Path) -> str:
+    """The image a LabelMe file points at, as a bare file name.
+
+    LabelMe on Windows stores ``imagePath`` with backslashes, which
+    ``Path(...).name`` does not split on Linux (Colab), so they are normalised
+    first. A missing or empty path falls back to the JSON's own name.
+    """
+    raw = data.get("imagePath")
+    name = str(raw).replace("\\", "/").rsplit("/", 1)[-1] if raw else ""
+    return name or (json_path.stem + ".png")
 
 
 def build_coco_dataset(
@@ -255,8 +275,14 @@ def build_coco_dataset(
     manifest = None
     manifest_path = request.input_dir / "sampling_manifest.json"
     if manifest_path.is_file():
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest = {f["file_name"]: f for f in data["frames"]}
+        data = _read_json_object(manifest_path)
+        try:
+            manifest = {f["file_name"]: f for f in data["frames"]}
+        except (KeyError, TypeError) as exc:
+            raise DatasetError(
+                f"{manifest_path} is malformed (missing {exc}); delete it or"
+                " sample again"
+            )
 
     report.enhancement = read_enhancement(request.input_dir)
 
@@ -272,15 +298,18 @@ def build_coco_dataset(
 
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             report.problems.append(f"{json_path.name}: not valid JSON ({exc})")
             continue
+        if not isinstance(data, dict):
+            report.problems.append(f"{json_path.name}: not a LabelMe object")
+            continue
 
-        image_name = data.get("imagePath") or (json_path.stem + ".png")
-        image_path = request.input_dir / Path(image_name).name
+        image_name = _image_name_of(data, json_path)
+        image_path = request.input_dir / image_name
         if not image_path.is_file():
             report.problems.append(
-                f"{json_path.name}: image {Path(image_name).name} not found beside it"
+                f"{json_path.name}: image {image_name} not found beside it"
             )
             continue
 
@@ -348,14 +377,14 @@ def build_coco_dataset(
 
         per_image.append(
             {
-                "file_name": Path(image_name).name,
+                "file_name": image_name,
                 "path": image_path,
                 "width": int(width),
                 "height": int(height),
                 "shapes": shapes,
-                "source_video": source_video_of(Path(image_name).name, manifest),
+                "source_video": source_video_of(image_name, manifest),
                 "group": group_of(
-                    source_video_of(Path(image_name).name, manifest),
+                    source_video_of(image_name, manifest),
                     request.group_overrides,
                     request.group_by,
                 ),
@@ -408,6 +437,16 @@ def build_coco_dataset(
                         images_dir if request.copy_images else None)
     val = _build_coco(val_images, "val", categories, category_of,
                       images_dir if request.copy_images else None)
+    if request.copy_images:
+        # a rebuilt dataset must not keep images the annotations dropped
+        wanted = {i["file_name"] for i in train_images + val_images}
+        for stale in images_dir.iterdir():
+            if (
+                stale.is_file()
+                and stale.suffix.lower() in IMAGE_SUFFIXES
+                and stale.name not in wanted
+            ):
+                stale.unlink()
 
     (request.output_dir / "train.json").write_text(json.dumps(train), encoding="utf-8")
     (request.output_dir / "val.json").write_text(json.dumps(val), encoding="utf-8")
@@ -503,6 +542,14 @@ def _split(per_image, request: DatasetRequest, report: DatasetReport):
     # the target than stopping would: adding it regardless, which is what this
     # did before, overshot a requested 15% to 26% on sixteen uneven recordings.
     target = len(per_image) * request.val_fraction
+    # Start from the group nearest the target, not whichever the shuffle put
+    # first: that one is taken unconditionally, so an oversized group would
+    # swallow the whole validation budget.
+    candidates = [v for v in videos if len(by_video[v]) <= len(per_image) - 1]
+    if candidates:
+        first = min(candidates, key=lambda v: abs(len(by_video[v]) - target))
+        videos.remove(first)
+        videos.insert(0, first)
     val_images: list[dict] = []
     train_images: list[dict] = []
     taken = 0
@@ -531,6 +578,17 @@ def _random_split(per_image, val_fraction: float, rng: random.Random):
     rng.shuffle(images)
     cut = max(1, round(len(images) * val_fraction))
     return images[cut:], images[:cut]
+
+
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+
+
+def _same_file(source: Path, target: Path) -> bool:
+    """True when target is an up-to-date copy of source (copy2 keeps mtime)."""
+    if not target.exists():
+        return False
+    a, b = source.stat(), target.stat()
+    return a.st_size == b.st_size and abs(a.st_mtime - b.st_mtime) < 2
 
 
 def _build_coco(subset, name, categories, category_of, images_dir: Path | None) -> dict:
@@ -581,6 +639,6 @@ def _build_coco(subset, name, categories, category_of, images_dir: Path | None) 
 
         if images_dir is not None:
             target = images_dir / image["file_name"]
-            if not target.exists():
+            if not _same_file(image["path"], target):
                 shutil.copy2(image["path"], target)
     return coco

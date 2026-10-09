@@ -86,7 +86,7 @@ class PrepState:
             return None
         path = Path(path)
         try:
-            return str(path.relative_to(self.root))
+            return path.relative_to(self.root).as_posix()
         except ValueError:
             return str(path)
 
@@ -142,6 +142,11 @@ class PrepState:
         for key, value in data.items():
             if key != "format_version" and hasattr(state, key) and key != "root":
                 setattr(state, key, value)
+        # entries written on Windows before paths were stored with "/"
+        for key in ("profile", "frames_dir", "dataset_dir"):
+            value = getattr(state, key)
+            if isinstance(value, str) and not Path(value).is_absolute():
+                setattr(state, key, value.replace("\\", "/"))
         return state
 
     def save(self) -> bool:

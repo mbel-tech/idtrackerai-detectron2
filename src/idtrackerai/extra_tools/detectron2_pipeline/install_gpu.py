@@ -101,6 +101,12 @@ def detect_machine() -> Machine:
     return Machine(kind="cpu")
 
 
+def installed_torch_version(python: str) -> str | None:
+    """The torch version already installed in that interpreter, or None."""
+    out = _run([python, "-c", "import torch; print(torch.__version__)"]).strip()
+    return out.splitlines()[-1].strip() if out else None
+
+
 def _index_exists(suffix: str, timeout: float = 10.0) -> bool:
     request = urllib.request.Request(INDEX_ROOT + suffix, method="HEAD")
     try:
@@ -164,10 +170,21 @@ def make_plan(python: str | None = None, check_index: bool = True) -> Plan:
     index = choose_index(machine, check=check_index)
     if index:
         torch_command += ["--index-url", index]
+        # pip treats a CPU torch as already satisfying "torch", so without this
+        # the CUDA build is silently never installed
+        current = installed_torch_version(python)
+        if machine.kind == "nvidia" and current and "+cu" not in current:
+            torch_command.append("--force-reinstall")
+            plan.notes.append(
+                f"torch {current} is installed without CUDA; it will be"
+                " replaced by a CUDA build."
+            )
     plan.commands.append(torch_command)
 
+    # --no-build-isolation: setup.py imports torch, which an isolated build
+    # environment does not have
     plan.commands.append(
-        [python, "-m", "pip", "install", DETECTRON2_URL]
+        [python, "-m", "pip", "install", "--no-build-isolation", DETECTRON2_URL]
     )
 
     if machine.kind == "cpu":

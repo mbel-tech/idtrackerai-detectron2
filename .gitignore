@@ -22,3 +22,9 @@ __pycache__
 
 # automatic generated documentation
 generated
+
+# local tooling leftovers
+.playwright-mcp/
+New folder/
+*.tmp_background.png
+.superpowers/

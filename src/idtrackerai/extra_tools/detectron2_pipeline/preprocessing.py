@@ -32,7 +32,9 @@ single-channel image is replicated across three channels by :func:`for_detectron
 """
 
 import argparse
+import functools
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -59,9 +61,76 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "illumination_sigma": ILLUMINATION_SIGMA,
     "illumination_downsample": ILLUMINATION_DOWNSAMPLE,
     "correct_lighting": True,
+    # Light edits; every default means "no change".
+    "exposure": 0.0,
+    "brightness": 0,
+    "contrast": 0,
+    "gamma": 1.0,
+    "shadows": 0,
+    "highlights": 0,
+    "blacks": 0,
+    "whites": 0,
+    "sharpness": 0,
+    "denoise": 0,
+}
+
+# Inclusive (min, max) per light-edit key.
+LIGHT_EDIT_RANGES: dict[str, tuple[float, float]] = {
+    "exposure": (-3.0, 3.0),
+    "brightness": (-100, 100),
+    "contrast": (-100, 100),
+    "gamma": (0.3, 3.0),
+    "shadows": (-100, 100),
+    "highlights": (-100, 100),
+    "blacks": (-100, 100),
+    "whites": (-100, 100),
+    "sharpness": (0, 100),
+    "denoise": (0, 10),
 }
 
 SETTING_KEYS = tuple(DEFAULT_SETTINGS)
+
+
+def normalize_settings(settings: dict | None) -> dict | None:
+    """Fills a possibly partial settings dict from the defaults, rejecting typos.
+
+    ``None`` stays ``None`` (no enhancement configured). A partial dict such as
+    ``{"clahe_clip": 2.0}`` is completed, so a .toml that sets one key does not
+    raise a KeyError deep inside a pool worker. Unknown keys are an error rather
+    than silently ignored, because a misspelt key would otherwise leave the
+    setting at its default without a word.
+    """
+    if settings is None:
+        return None
+    if not isinstance(settings, dict):
+        raise PreprocessingError(
+            f"enhancement must be a table of settings, got {type(settings).__name__}"
+        )
+    unknown = sorted(set(settings) - set(SETTING_KEYS))
+    if unknown:
+        raise PreprocessingError(
+            f"Unknown enhancement setting(s): {', '.join(map(repr, unknown))}. "
+            f"Valid settings are: {', '.join(SETTING_KEYS)}"
+        )
+    merged = {**DEFAULT_SETTINGS, **settings}
+    for key in ("clahe_clip", "illumination_sigma"):
+        if isinstance(merged[key], bool) or not isinstance(merged[key], (int, float)):
+            raise PreprocessingError(f"enhancement '{key}' must be a number")
+    for key in ("clahe_tile", "illumination_downsample"):
+        if isinstance(merged[key], bool) or not isinstance(merged[key], int):
+            raise PreprocessingError(f"enhancement '{key}' must be an integer")
+    for key, (lo, hi) in LIGHT_EDIT_RANGES.items():
+        value = merged[key]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not lo <= value <= hi
+        ):
+            raise PreprocessingError(
+                f"enhancement '{key}' must be a number between {lo} and {hi}"
+            )
+    return merged
 
 
 def to_gray(frame: np.ndarray) -> np.ndarray:
@@ -111,6 +180,60 @@ def apply_clahe(
     return clahe.apply(gray)
 
 
+@functools.lru_cache(maxsize=64)
+def tone_lut(
+    exposure: float,
+    brightness: float,
+    contrast: float,
+    gamma: float,
+    shadows: float,
+    highlights: float,
+    blacks: float,
+    whites: float,
+) -> np.ndarray:
+    """256-entry lookup table for the tone controls, identity when all are neutral.
+
+    Cached, so the returned array is read-only.
+    """
+    x = np.arange(256) / 255.0
+
+    # Levels: positive whites pull the white point in (brighter whites) and
+    # positive blacks push the black point out (lifted blacks).
+    black_in = -0.5 * blacks / 100
+    white_in = max(1 - 0.5 * whites / 100, black_in + 0.05)
+    x = np.clip((x - black_in) / (white_in - black_in), 0, 1)
+    x = np.clip(x * 2.0**exposure, 0, 1)
+    x = np.clip(x ** (1 / gamma), 0, 1)
+    # Shadow/highlight bumps. 0.25 is the largest amplitude that keeps the
+    # curve monotonic.
+    x = np.clip(x + 0.25 * shadows / 100 * np.where(x < 0.5, (1 - 2 * x) ** 2, 0), 0, 1)
+    x = np.clip(x + 0.25 * highlights / 100 * np.where(x > 0.5, (2 * x - 1) ** 2, 0), 0, 1)
+    x = np.clip(0.5 + (x - 0.5) * (1 + contrast / 100), 0, 1)
+    x = np.clip(x + brightness / 100, 0, 1)
+
+    lut = np.round(x * 255).astype(np.uint8)
+    lut.flags.writeable = False
+    return lut
+
+
+def denoise(gray: np.ndarray, strength: float) -> np.ndarray:
+    """Edge-preserving smoothing; ``strength`` 0 returns the input unchanged."""
+    if strength <= 0:
+        return gray
+    return cv2.bilateralFilter(gray, 5, 8 * strength, strength)
+
+
+_denoise = denoise  # enhance() has a parameter of the same name
+
+
+def sharpen(gray: np.ndarray, amount: float) -> np.ndarray:
+    """Unsharp mask; ``amount`` 0 returns the input unchanged."""
+    if amount <= 0:
+        return gray
+    a = amount / 50
+    return cv2.addWeighted(gray, 1 + a, cv2.GaussianBlur(gray, (0, 0), 2.0), -a, 0)
+
+
 def enhance(
     frame: np.ndarray,
     clahe_clip: float = CLAHE_CLIP_LIMIT,
@@ -118,12 +241,49 @@ def enhance(
     downsample: int = ILLUMINATION_DOWNSAMPLE,
     sigma: float = ILLUMINATION_SIGMA,
     correct_lighting: bool = True,
+    *,
+    exposure: float = 0.0,
+    brightness: float = 0,
+    contrast: float = 0,
+    gamma: float = 1.0,
+    shadows: float = 0,
+    highlights: float = 0,
+    blacks: float = 0,
+    whites: float = 0,
+    sharpness: float = 0,
+    denoise: float = 0,
 ) -> np.ndarray:
-    """Full enhancement, returning a single-channel uint8 image."""
+    """Full enhancement, returning a single-channel uint8 image.
+
+    Order: denoise, lighting evenness, tone, CLAHE, sharpen. A step left at its
+    default is skipped without touching the pixels.
+    """
     gray = to_gray(frame)
+    gray = _denoise(gray, denoise)
     if correct_lighting:
         gray = correct_illumination(gray, downsample, sigma)
-    return apply_clahe(gray, clahe_clip, clahe_tile)
+    tone = (exposure, brightness, contrast, gamma, shadows, highlights, blacks, whites)
+    if tone != (0, 0, 0, 1.0, 0, 0, 0, 0):
+        gray = cv2.LUT(gray, tone_lut(*tone))
+    gray = apply_clahe(gray, clahe_clip, clahe_tile)
+    return sharpen(gray, sharpness)
+
+
+def enhance_with_settings(frame: np.ndarray, settings: dict) -> np.ndarray:
+    """``enhance`` driven by a settings dict; missing keys take their defaults.
+
+    The ``enhance`` on/off flag is the caller's business and is ignored here.
+    """
+    s = {**DEFAULT_SETTINGS, **settings}
+    return enhance(
+        frame,
+        clahe_clip=s["clahe_clip"],
+        clahe_tile=s["clahe_tile"],
+        downsample=s["illumination_downsample"],
+        sigma=s["illumination_sigma"],
+        correct_lighting=s["correct_lighting"],
+        **{k: s[k] for k in LIGHT_EDIT_RANGES},
+    )
 
 
 def for_detectron2(frame: np.ndarray, **kwargs) -> np.ndarray:
@@ -213,6 +373,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="apply CLAHE only, leaving uneven lighting in place",
     )
+    for key, (low, high) in LIGHT_EDIT_RANGES.items():
+        group.add_argument(
+            f"--{key}",
+            type=float,
+            default=None,
+            help=f"light edit, from {low:g} to {high:g} (default: {DEFAULT_SETTINGS[key]:g})",
+        )
 
 
 def _explicit_from_args(args) -> dict:
@@ -223,6 +390,7 @@ def _explicit_from_args(args) -> dict:
         ("clahe_tile", "clahe_tile"),
         ("illumination_sigma", "illumination_sigma"),
         ("illumination_downsample", "illumination_downsample"),
+        *((key, key) for key in LIGHT_EDIT_RANGES),
     ):
         value = getattr(args, flag, None)
         if value is not None:
@@ -272,7 +440,7 @@ def resolve_settings(args, fallback: dict | None = None, fallback_label: str = "
 
     if not settings["enhance"]:
         notes.append("enhancement is OFF; raw frames are used")
-    return settings, notes
+    return normalize_settings(settings), notes
 
 
 def settings_from_args(args) -> dict:
@@ -289,14 +457,7 @@ def make_enhancer_from(settings: dict):
         )
 
     def enhancer(frame: np.ndarray) -> np.ndarray:
-        return for_detectron2(
-            frame,
-            clahe_clip=settings["clahe_clip"],
-            clahe_tile=settings["clahe_tile"],
-            downsample=settings["illumination_downsample"],
-            sigma=settings["illumination_sigma"],
-            correct_lighting=settings["correct_lighting"],
-        )
+        return cv2.cvtColor(enhance_with_settings(frame, settings), cv2.COLOR_GRAY2BGR)
 
     return enhancer
 
@@ -317,6 +478,13 @@ def describe(settings: dict) -> str:
         )
     else:
         parts.append("no illumination correction")
+    edits = [
+        f"{key}={settings[key]:+g}"
+        for key in LIGHT_EDIT_RANGES
+        if key in settings and settings[key] != DEFAULT_SETTINGS[key]
+    ]
+    if edits:
+        parts.append(", ".join(edits))
     return "; ".join(parts)
 
 
@@ -329,9 +497,11 @@ def check_settings_match(recorded: dict | None, current: dict, label: str) -> st
     if not recorded:
         return None
     differences = [
-        f"{key}: trained with {recorded[key]!r}, now {current[key]!r}"
+        f"{key}: trained with {was!r}, now {current[key]!r}"
         for key in current
-        if key in recorded and recorded[key] != current[key]
+        if key in DEFAULT_SETTINGS
+        for was in [recorded.get(key, DEFAULT_SETTINGS[key])]
+        if was != current[key]
     ]
     if not differences:
         return None
@@ -379,16 +549,8 @@ def _demo():
 
     gray = to_gray(frame)
     if settings["enhance"]:
-        lit = (
-            correct_illumination(
-                gray, settings["illumination_downsample"], settings["illumination_sigma"]
-            )
-            if settings["correct_lighting"]
-            else gray
-        )
-        final = apply_clahe(lit, settings["clahe_clip"], settings["clahe_tile"])
-        strip = np.hstack([gray, lit, final])
-        caption = "grayscale | illumination-corrected | + CLAHE"
+        strip = np.hstack([gray, enhance_with_settings(frame, settings)])
+        caption = "grayscale | enhanced"
     else:
         strip = gray
         caption = "grayscale only (enhancement off)"

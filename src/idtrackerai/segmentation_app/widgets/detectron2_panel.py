@@ -15,6 +15,7 @@ a job that takes days. Status is re-derived from disk on every load rather than
 trusted from the state file, so a deleted folder shows as incomplete.
 """
 
+import importlib.util
 import logging
 import sys
 from pathlib import Path
@@ -54,6 +55,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from idtrackerai.extra_tools.detectron2_pipeline import bundle as bundle_mod
 from idtrackerai.extra_tools.detectron2_pipeline import dataset as dataset_mod
 from idtrackerai.extra_tools.detectron2_pipeline import gpu as gpu_mod
 from idtrackerai.extra_tools.detectron2_pipeline import install_gpu as install_mod
@@ -259,6 +261,11 @@ class Detectron2Panel(QWidget):
         self.open_folder_button.clicked.connect(self.open_frames_folder)
         self.refresh_button = QPushButton("Refresh count")
         self.refresh_button.clicked.connect(self.refresh)
+        # Where the Colab route begins. Annotating is the last step that wants
+        # eyes on the footage, so this is the moment someone without a CUDA
+        # card needs the notebook -- not buried in the docs.
+        self.bundle_button = QPushButton("Get Colab bundle...")
+        self.bundle_button.clicked.connect(self.save_colab_bundle)
         self.annotate_status = WrappedLabel()
 
         form = QFormLayout()
@@ -268,6 +275,7 @@ class Detectron2Panel(QWidget):
         row.addWidget(self.launch_button)
         row.addWidget(self.open_folder_button)
         row.addWidget(self.refresh_button)
+        row.addWidget(self.bundle_button)
 
         layout = QVBoxLayout(page)
         layout.addLayout(form)
@@ -553,6 +561,50 @@ class Detectron2Panel(QWidget):
         layout.addWidget(self.copy_command_button)
         return page
 
+    def save_colab_bundle(self) -> None:
+        """Write the Colab bundle, and say what else has to go on Drive.
+
+        Offered here because annotating is the last step that wants eyes on
+        the footage. Everything after it needs a CUDA card, and for anyone
+        without one that means Colab -- so this is the moment they need the
+        notebook, not a line in the documentation.
+        """
+        frames = self.state.frames_path if self.state else None
+        default = Path(self.frames_dir.text() or ".").parent / "colab_bundle.zip"
+        name, _ = QFileDialog.getSaveFileName(
+            self, "Save the Colab bundle", str(default), filter="Zip (*.zip)"
+        )
+        if not name:
+            return
+
+        try:
+            written = bundle_mod.build(Path(name))
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not write the bundle", str(exc))
+            return
+
+        size_kb = written.stat().st_size / 1024
+        upload = [f"{written}          (this bundle)"]
+        if frames is not None and frames.is_dir():
+            upload.append(f"{frames}          (your frames and annotations)")
+        else:
+            upload.append("the folder holding your annotated frames")
+
+        QMessageBox.information(
+            self,
+            "Colab bundle written",
+            f"{written.name} ({size_kb:.0f} KB)\n\n"
+            "Put these in one folder on Google Drive:\n\n  "
+            + "\n  ".join(upload)
+            + "\n\nThe videos go on Drive too, anywhere you like - the "
+            "notebook asks where. Then open "
+            "colab_detectron2_pipeline.ipynb from inside the bundle.\n\n"
+            "It picks up at step 4 and runs to the end: dataset, training, "
+            "contour export, and the parameter files for tracking.\n\n"
+            "Tip: 'Save parameters' writes a .toml the notebook will inherit, "
+            "so your animal count, ROI and area thresholds carry over.",
+        )
+
     # ----------------------------------------------------- GPU capability
     def check_gpu(self) -> None:
         if self.gpu_thread.isRunning():
@@ -826,7 +878,10 @@ class Detectron2Panel(QWidget):
         )
         known = [self._counts.get(v) for v in videos]
         counted = [c for c in known if c]
-        parts = [f"{len(videos)} videos", f"{len(groups)} recordings"]
+        def plural(n: int, noun: str) -> str:
+            return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+        parts = [plural(len(videos), "video"), plural(len(groups), "recording")]
         if len(counted) == len(videos):
             parts.append(f"{sum(counted):,} frames")
         else:
@@ -986,6 +1041,16 @@ class Detectron2Panel(QWidget):
             QMessageBox.warning(self, "No frames", "Sample some frames first.")
             return
 
+        if importlib.util.find_spec("labelme") is None:
+            QMessageBox.warning(
+                self,
+                "LabelMe is not installed",
+                "Annotating needs LabelMe, which is an optional extra. Install "
+                "it into this environment with:\n\n"
+                f'  "{sys.executable}" -m pip install "idtrackerai-detectron2[annotate]"',
+            )
+            return
+
         arguments = ["-m", "labelme", str(folder)]
         label = self.class_name.text().strip()
         if label:
@@ -1010,7 +1075,7 @@ class Detectron2Panel(QWidget):
                 "Could not start LabelMe",
                 "Tried to run:\n\n"
                 f"  {sys.executable} {' '.join(arguments)}\n\n"
-                "LabelMe is a dependency of this package, so this usually means "
+                "LabelMe is installed but would not start, so this usually means "
                 "the environment is broken. Check that "
                 "'python -m labelme --help' works.",
             )
@@ -1232,6 +1297,11 @@ class Detectron2Panel(QWidget):
 
     def _training_error(self, error) -> None:
         self.train_log.appendPlainText(f"\nCould not run training: {error}")
+        if error == QProcess.ProcessError.FailedToStart:
+            # a process that never started never emits finished, so without
+            # this the Train and Install buttons would stay disabled for good
+            self.train_process = None
+            self._refresh_gpu_steps()
 
     def _training_finished(self, code: int, _status) -> None:
         self.train_process = None
@@ -1250,20 +1320,62 @@ class Detectron2Panel(QWidget):
         self.train_process.kill()
 
     # ------------------------------------------------------------- step 6 run
+    VIDEO_SUFFIXES = (".mp4", ".avi", ".mov", ".mkv", ".mpg", ".mpeg", ".wmv", ".m4v")
+
+    def _export_target(self, videos) -> tuple[str, str]:
+        """The ``--videos`` argument, and a phrase describing what it covers.
+
+        A glob is used only when it means exactly this list: one folder, and
+        every video in it. Anything else is listed clip by clip, because a
+        command that quietly exports the wrong set is worse than a long one.
+        """
+        if not videos:
+            return '"<folder>/*.mp4"', "no videos listed yet"
+
+        parents = {video.parent for video in videos}
+        if len(parents) == 1:
+            folder = parents.pop()
+            suffix = videos[0].suffix.lower()
+            same_suffix = all(v.suffix.lower() == suffix for v in videos)
+            try:
+                on_disk = {
+                    p for p in folder.iterdir()
+                    if p.suffix.lower() in self.VIDEO_SUFFIXES
+                    and not sampling_mod._is_sidecar(p)
+                }
+            except OSError:
+                on_disk = set()
+            if same_suffix and on_disk and on_disk == set(videos):
+                return (
+                    f'"{folder / ("*" + suffix)}"',
+                    f"every {suffix} file in {folder.name}",
+                )
+
+        listed = " ".join(f'"{video}"' for video in videos)
+        where = (
+            "across several folders" if len(parents) > 1
+            else "a subset of that folder"
+        )
+        return listed, f"the {len(videos)} clips listed above, {where}"
+
     def _update_export_command(self) -> None:
         videos = self.video_paths
         model = self.model_dir.text() or "<model folder>"
         contours = self.contours_dir.text() or "<contours folder>"
-        pattern = (
-            str(videos[0].parent / "*.mp4") if videos else "<folder>/*.mp4"
-        )
+
+        # A glob of the first clip's folder is only right when the list IS
+        # that folder. On a curated list it exports clips that were removed,
+        # and on a list spanning folders it silently leaves whole folders out
+        # -- which would surface a day and a half into an export.
+        target, scope = self._export_target(videos)
         command = (
             f'"{sys.executable}" "{self._script("inference.py")}"'
-            f' --videos "{pattern}"'
+            f' --videos {target}'
             f' --weights "{Path(model) / "model_final.pth"}"'
             f' --output-dir "{contours}"'
         )
         self.export_command.setPlainText(command)
+        self._export_scope = scope
 
         where = (
             "This machine can run it."
@@ -1271,11 +1383,12 @@ class Detectron2Panel(QWidget):
             else "This machine cannot run it; the Colab notebook can."
         )
         self.export_status.setText(
-            "Running the model over every frame takes roughly an hour per "
-            "30 000-frame clip, so a collection takes days. It is not run from "
-            "here: copy the command and run it in a terminal you can leave "
-            "open. It writes one file per clip and skips clips it has already "
-            f"done, so it can be stopped and restarted freely. {where}"
+            f"This exports {scope}. Running the model over every frame takes "
+            "roughly an hour per 30 000-frame clip, so a collection takes "
+            "days. It is not run from here: copy the command and run it in a "
+            "terminal you can leave open. It writes one file per clip and "
+            "skips clips it has already done, so it can be stopped and "
+            f"restarted freely. {where}"
         )
 
     def copy_export_command(self) -> None:
@@ -1345,6 +1458,7 @@ class Detectron2Panel(QWidget):
             (self.launch_button, "d2_labelme"),
             (self.open_folder_button, "d2_open_folder"),
             (self.refresh_button, "d2_refresh"),
+            (self.bundle_button, "d2_bundle"),
             (self.expected_instances, "d2_expected"),
             (self.val_fraction, "d2_val_fraction"),
             (self.group_by, "d2_group_by"),
@@ -1382,7 +1496,12 @@ class Detectron2Panel(QWidget):
                        self.count_thread, self.gpu_thread):
             if thread.isRunning():
                 thread.quit()
-                thread.wait(5000)
+                if not thread.wait(5000):
+                    # quit() only asks, and the GPU check in particular does
+                    # not listen. A QThread destroyed while it still runs
+                    # aborts the whole process.
+                    thread.terminate()
+                    thread.wait(2000)
         if self.state is not None:
             self.state.save()
         return super().close()

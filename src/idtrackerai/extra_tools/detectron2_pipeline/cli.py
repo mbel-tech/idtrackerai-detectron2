@@ -54,6 +54,14 @@ def sample_main():
         default="png",
         help="png is lossless; jpg artefacts can shift annotated boundaries",
     )
+    parser.add_argument(
+        "--force-new-enhancement",
+        action="store_true",
+        help=(
+            "allow sampling into a folder whose recorded enhancement differs "
+            "from the settings given; the folder's profile is then overwritten"
+        ),
+    )
     fp.add_arguments(parser)
     args = parser.parse_args()
 
@@ -62,10 +70,22 @@ def sample_main():
         if not videos:
             raise SamplingError(f"No videos matched {args.videos}")
 
-        settings, notes = fp.resolve_settings(args)
+        # Sampling again into a folder reuses its recorded enhancement unless
+        # told otherwise, so a growing corpus is not silently mixed.
+        recorded = sampling_mod.recorded_enhancement(args.output)
+        settings, notes = fp.resolve_settings(
+            args, fallback=recorded, fallback_label=f"the profile in {args.output}"
+        )
         for note in notes:
             print(note)
         print(f"enhancement: {fp.describe(settings)}")
+        if args.format == "jpg":
+            print(
+                "WARNING: --format jpg writes lossy frames. Training would see"
+                " JPEG artefacts that inference on video frames never has, so"
+                " the model trains on a different image distribution than it is"
+                " run on. Prefer png unless disk space forces otherwise."
+            )
 
         plans = sampling_mod.plan_sampling(
             videos, args.n_frames, args.seed, args.even, args.uniform_random
@@ -91,6 +111,7 @@ def sample_main():
             uniform_random=args.uniform_random,
             image_format=args.format,
             progress=report,
+            force_new_enhancement=args.force_new_enhancement,
         )
     except PipelineError as exc:
         raise SystemExit(str(exc))

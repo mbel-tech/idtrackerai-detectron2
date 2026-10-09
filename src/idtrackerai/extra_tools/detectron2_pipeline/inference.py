@@ -67,8 +67,10 @@ masks intersect:
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import sys
 import time
@@ -83,6 +85,83 @@ try:
 except ImportError:  # loaded by path, e.g. from a Colab bundle
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import preprocessing as fp  # type: ignore[no-redef]
+
+
+class ExportError(RuntimeError):
+    """A video could not be exported; the batch goes on with the next one."""
+
+
+# More unreadable frames than this fraction of a video means the file is
+# damaged or truncated, and the contours would silently have holes in them.
+MAX_READ_FAILURE_FRACTION = 0.01
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def video_frame_count(video: Path) -> int:
+    cap = cv2.VideoCapture(str(video))
+    try:
+        return int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    finally:
+        cap.release()
+
+
+def stale_reason(output: Path, video: Path, args, enhancement: dict) -> str | None:
+    """Why an existing contour file cannot be reused, or None if it is current.
+
+    Skipping on mere existence would keep contours made with other weights, a
+    different enhancement or threshold, or from a truncated earlier run.
+    """
+    import h5py
+
+    try:
+        with h5py.File(output, "r") as file:
+            attrs = dict(file.attrs)
+    except OSError as exc:
+        return f"unreadable ({exc})"
+
+    def differs(key, expected) -> bool:
+        if key not in attrs:
+            return True
+        recorded = attrs[key]
+        if isinstance(expected, float):
+            return abs(float(recorded) - expected) > 1e-9
+        return recorded != expected
+
+    postprocessing = {
+        "min_component": args.min_component,
+        "dilate": args.dilate,
+        "dedup_iou": args.dedup_iou,
+        "merge_overlap": args.merge_overlap,
+    }
+    checks = {
+        "weights_sha256": args.weights_sha256,
+        "score_threshold": float(args.score_threshold),
+        "max_instances": args.max_instances,
+        "on_overlap": args.on_overlap,
+        "n_frames": (
+            min(video_frame_count(video), args.limit)
+            if args.limit
+            else video_frame_count(video)
+        ),
+    }
+    for key, expected in checks.items():
+        if differs(key, expected):
+            return f"{key} differs (file: {attrs.get(key)!r}, now: {expected!r})"
+    try:
+        if json.loads(attrs.get("enhancement", "null")) != enhancement:
+            return "enhancement differs"
+        if json.loads(attrs.get("postprocessing", "null")) != postprocessing:
+            return "postprocessing differs"
+    except (TypeError, ValueError):
+        return "enhancement or postprocessing record is unreadable"
+    return None
 
 
 def load_training_metadata(weights: Path) -> dict | None:
@@ -175,6 +254,15 @@ def deduplicate(masks: list[np.ndarray], scores: list[float], iou_th: float):
     return [masks[i] for i in kept], [scores[i] for i in kept]
 
 
+def largest_component(mask: np.ndarray) -> np.ndarray:
+    """The biggest 8-connected piece of a binary mask."""
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if n_labels <= 2:
+        return mask
+    biggest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    return (labels == biggest).astype(np.uint8)
+
+
 def resolve_overlaps(masks: list[np.ndarray], scores: list[float], policy: str,
                      merge_th: float):
     """Applies the chosen overlap policy, returning the masks to be emitted."""
@@ -190,7 +278,10 @@ def resolve_overlaps(masks: list[np.ndarray], scores: list[float], policy: str,
             exclusive = np.logical_and(masks[i], ~claimed)
             if exclusive.any():
                 claimed |= exclusive.astype(bool)
-                out_masks.append(exclusive.astype(np.uint8))
+                # removing the claimed pixels can cut one animal into pieces,
+                # and each piece would become its own blob
+                exclusive = largest_component(exclusive.astype(np.uint8))
+                out_masks.append(exclusive)
                 out_scores.append(scores[i])
         return out_masks, out_scores
 
@@ -276,6 +367,7 @@ class Detectron2Predictor:
 
         cfg = get_cfg()
         cfg.merge_from_file(model_zoo.get_config_file(config))
+        print(f"Loading weights {args.weights} (unpickled by torch: trusted files only)")
         cfg.MODEL.WEIGHTS = str(args.weights)
         cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_classes
         cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.score_threshold
@@ -294,6 +386,10 @@ class Detectron2Predictor:
 
 def build_predictor(args, metadata: dict | None):
     """Returns the backend named by ``--backend`` and a string describing it.
+
+    Security: ``--weights`` is loaded by torch, which unpickles it, and
+    unpickling can execute arbitrary code. Only use weights you trained
+    yourself or obtained from a source you trust.
 
     The description is recorded in the sidecar so a contour file says which
     model made it, which matters once two of them can.
@@ -350,15 +446,42 @@ def export_video(
         # dominate inference time. Copying the clip to local disk first is
         # usually several times faster overall despite the up-front copy.
         args.local_cache.mkdir(parents=True, exist_ok=True)
-        temporary_copy = args.local_cache / video.name
-        if not temporary_copy.exists():
+        # the folder hash keeps same-named clips from different folders apart
+        tag = hashlib.sha1(str(video.resolve()).encode()).hexdigest()[:8]
+        temporary_copy = args.local_cache / f"{tag}_{video.name}"
+        if (
+            not temporary_copy.exists()
+            or temporary_copy.stat().st_size != video.stat().st_size
+        ):
             print(f"  copying to {temporary_copy} ...", flush=True)
-            shutil.copy2(video, temporary_copy)
+            # copy beside the final name and rename, so an interrupted copy is
+            # never mistaken for a complete one on the next run
+            partial_copy = temporary_copy.with_name(temporary_copy.name + ".partial")
+            shutil.copy2(video, partial_copy)
+            if partial_copy.stat().st_size != video.stat().st_size:
+                partial_copy.unlink(missing_ok=True)
+                raise ExportError(f"Copy of {video} to the local cache is incomplete")
+            partial_copy.replace(temporary_copy)
         local = temporary_copy
 
     cap = cv2.VideoCapture(str(local))
+    try:
+        return _export_opened_video(
+            cap, video, local, temporary_copy, output, args, predictor, config,
+            enhance, enhancement, write_contours, started,
+        )
+    finally:
+        cap.release()
+        if temporary_copy is not None and not args.keep_cache:
+            temporary_copy.unlink(missing_ok=True)
+
+
+def _export_opened_video(
+    cap, video, local, temporary_copy, output, args, predictor, config, enhance,
+    enhancement, write_contours, started,
+) -> dict:
     if not cap.isOpened():
-        raise SystemExit(f"Could not open {local}")
+        raise ExportError(f"Could not open {local}")
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -372,6 +495,7 @@ def export_video(
     scores_per_frame: list[list[float]] = []
     empty_frames = 0
     short_frames = 0
+    read_failures = 0
     clock = time.monotonic()
 
     for frame_index in range(n_frames):
@@ -386,9 +510,18 @@ def export_video(
             # Keep the frame slot so frame numbers stay aligned with the video.
             # idtracker.ai treats a frame with no contours as one with no
             # visible animals, which is what an unreadable frame amounts to.
+            # Counted apart from frames the model genuinely found empty.
             contours_per_frame.append([])
             scores_per_frame.append([])
-            empty_frames += 1
+            read_failures += 1
+            if read_failures <= 5:
+                print(f"  WARNING: could not read frame {frame_index}", flush=True)
+            if read_failures > max(1, MAX_READ_FAILURE_FRACTION * n_frames):
+                raise ExportError(
+                    f"{video.name}: more than {MAX_READ_FAILURE_FRACTION:.0%} of the"
+                    f" frames are unreadable ({read_failures} so far, at frame"
+                    f" {frame_index}); the file is probably damaged or truncated"
+                )
             # Report it here too: a run whose tail is unreadable would
             # otherwise leave the bar short of the end, which reads as a hang.
             if progress is not None:
@@ -437,9 +570,8 @@ def export_video(
                 flush=True,
             )
 
-    cap.release()
-    if temporary_copy is not None and not args.keep_cache:
-        temporary_copy.unlink(missing_ok=True)
+    if read_failures:
+        print(f"  WARNING: {read_failures} unreadable frame(s) left empty", flush=True)
 
     # Write to a .partial first, then move into place. A session that dies
     # mid-write would otherwise leave a truncated .h5 that the resume logic
@@ -463,6 +595,8 @@ def export_video(
         video=video.name,
         model=model_description,
         weights=Path(args.weights).name,
+        weights_sha256=args.weights_sha256,
+        read_failures=read_failures,
         score_threshold=args.score_threshold,
         max_instances=args.max_instances,
         on_overlap=args.on_overlap,
@@ -490,6 +624,7 @@ def export_video(
         "contours_per_frame": round(total / max(len(contours_per_frame), 1), 3),
         "empty_frames": empty_frames,
         "short_frames": short_frames,
+        "read_failures": read_failures,
         "seconds": round(elapsed, 1),
         "fps": round(len(contours_per_frame) / max(elapsed, 1e-6), 2),
         "size_mb": round(output.stat().st_size / 1e6, 2),
@@ -694,9 +829,39 @@ def main():
                 print(f"\nWARNING: {mismatch}\n")
 
     def output_for(video: Path) -> Path:
-        return args.output if args.output else args.output_dir / f"{video.stem}.h5"
+        path = args.output if args.output else args.output_dir / f"{video.stem}.h5"
+        if args.limit:
+            # a partial run must never be mistaken for the real export
+            path = path.with_name(f"{path.stem}.limit{args.limit}{path.suffix}")
+        return path
 
-    pending = [v for v in videos if args.overwrite or not output_for(v).exists()]
+    outputs = [output_for(v) for v in videos]
+    if len(set(outputs)) != len(outputs):
+        raise SystemExit(
+            "Two videos would write the same contour file (same file name in"
+            " different folders). Export them separately."
+        )
+
+    # Videos are identified in the log by their path relative to the folder they
+    # share, so same-named clips in different folders do not overwrite each other.
+    root = Path(os.path.commonpath([str(v.resolve().parent) for v in videos]))
+
+    def log_key(video: Path) -> str:
+        key = video.resolve().relative_to(root).as_posix()
+        return f"{key}#limit{args.limit}" if args.limit else key
+
+    args.weights_sha256 = file_sha256(args.weights)
+
+    def needs_export(video: Path) -> bool:
+        output = output_for(video)
+        if args.overwrite or not output.exists():
+            return True
+        reason = stale_reason(output, video, args, enhancement)
+        if reason:
+            print(f"{output.name} exists but is out of date ({reason}); redoing it")
+        return bool(reason)
+
+    pending = [v for v in videos if needs_export(v)]
     done_already = len(videos) - len(pending)
     print(
         f"{len(videos)} video(s); {done_already} already exported,"
@@ -708,7 +873,9 @@ def main():
 
     predictor, model_description = build_predictor(args, metadata)
 
-    log_path = (args.output_dir or args.output.parent) / "export_log.json"
+    log_path = (args.output_dir or args.output.parent) / (
+        "export_log.limit.json" if args.limit else "export_log.json"
+    )
     log = []
     if log_path.is_file():
         try:
@@ -716,6 +883,7 @@ def main():
         except json.JSONDecodeError:
             log = []
 
+    failed: list[str] = []
     for i, video in enumerate(pending, start=1):
         print(f"\n[{i}/{len(pending)}] {video.name}", flush=True)
         try:
@@ -732,9 +900,19 @@ def main():
         except KeyboardInterrupt:
             print("\nInterrupted. Finished videos are kept; rerun to continue.")
             break
+        except ExportError as exc:
+            print()
+            print(f"ERROR: {exc}", flush=True)
+            failed.append(video.name)
+            continue
         if stats is None:  # only reachable with an abort callback, but cheap
             break
-        log = [entry for entry in log if entry.get("video") != stats["video"]]
+        stats["key"] = log_key(video)
+        log = [
+            entry
+            for entry in log
+            if entry.get("key", entry.get("video")) != stats["key"]
+        ]
         log.append(stats)
         # rewritten after every video, so a session that dies still leaves a record
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -749,6 +927,9 @@ def main():
         f" {short:,} with fewer than {args.max_instances}"
     )
     print(f"  log: {log_path}")
+    if failed:
+        print()
+        print(f"{len(failed)} video(s) FAILED: {', '.join(failed)}")
     if empty or short:
         print(
             "\nFrames with missing animals are left as they are, on purpose.\n"
@@ -756,6 +937,8 @@ def main():
             "interpolation are built for exactly this and work from the whole\n"
             "video, not from one previous frame."
         )
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
