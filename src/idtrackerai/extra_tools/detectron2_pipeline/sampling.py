@@ -26,10 +26,17 @@ import cv2
 
 try:
     from .errors import SamplingError
-    from .preprocessing import SETTING_KEYS, load_profile, make_enhancer_from, save_profile
+    from .preprocessing import (
+        DEFAULT_SETTINGS,
+        SETTING_KEYS,
+        load_profile,
+        make_enhancer_from,
+        save_profile,
+    )
 except ImportError:  # loaded by path, without the package around it
     from errors import SamplingError  # type: ignore[no-redef]
     from preprocessing import (  # type: ignore[no-redef]
+        DEFAULT_SETTINGS,
         SETTING_KEYS,
         load_profile,
         make_enhancer_from,
@@ -286,9 +293,9 @@ def check_enhancement_unchanged(output: Path, settings: dict) -> None:
     if not recorded:
         return
     differences = [
-        f"{key}: folder has {recorded[key]!r}, now {settings[key]!r}"
+        f"{key}: folder has {recorded.get(key, DEFAULT_SETTINGS[key])!r}, now {settings[key]!r}"
         for key in SETTING_KEYS
-        if key in recorded and key in settings and recorded[key] != settings[key]
+        if key in settings and recorded.get(key, DEFAULT_SETTINGS[key]) != settings[key]
     ]
     if differences:
         raise SamplingError(

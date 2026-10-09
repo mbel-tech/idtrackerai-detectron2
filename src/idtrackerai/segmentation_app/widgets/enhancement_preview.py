@@ -119,14 +119,7 @@ class EnhancementPreview(QObject):
         if key == self._key and self._pixmap is not None:
             return
 
-        enhanced = fp.enhance(
-            frame,
-            clahe_clip=self.settings["clahe_clip"],
-            clahe_tile=self.settings["clahe_tile"],
-            downsample=self.settings["illumination_downsample"],
-            sigma=self.settings["illumination_sigma"],
-            correct_lighting=self.settings["correct_lighting"],
-        )
+        enhanced = fp.enhance_with_settings(frame, self.settings)
         if enhanced is frame:
             # Frames come from an lru_cache and are shared; handing the very
             # same buffer to a QImage that does not copy would be a hazard.
