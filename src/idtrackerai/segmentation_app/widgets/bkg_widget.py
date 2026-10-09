@@ -1,3 +1,4 @@
+import json
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -305,6 +306,15 @@ class BkgWidget(QWidget):
 
         file_path = Path(file_path)
         cv2.imencode(file_path.suffix, self.bkg_thread.bkg)[1].tofile(file_path)
+        # the image was built from enhanced frames, and loading it back as a
+        # Custom background must not enhance it a second time
+        enhancement = self.bkg_thread.enhancement
+        file_path.with_suffix(".enhancement.json").write_text(
+            json.dumps(
+                {"enhancement": enhancement if enhancement and enhancement.get("enhance") else None}
+            ),
+            encoding="utf-8",
+        )
         file_saved_dialog(self, file_path)
 
     def CheckBox_changed(self, checked):

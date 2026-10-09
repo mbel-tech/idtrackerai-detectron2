@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import Callable, Sequence
 from io import BytesIO
@@ -498,10 +499,39 @@ def load_custom_background(
     if example_video_path is not None:
         check_background_shape(bkg, example_video_path)
 
-    # Frames are enhanced before the comparison, so a user's image must be too
-    if enhancement and enhancement.get("enhance", True):
-        bkg = apply_enhancement(bkg, enhancement)
+    # Frames are enhanced before the comparison, so a user's image must be too.
+    # The exception is a background the apps saved themselves: it was built from
+    # enhanced frames and says so in a sidecar. CLAHE is not idempotent, so
+    # enhancing it again would no longer match the frames.
+    active = (
+        normalize_enhancement(enhancement)
+        if enhancement and enhancement.get("enhance", True)
+        else None
+    )
+    recorded = _recorded_background_enhancement(path)
+    if recorded is _NO_RECORD or recorded is None:
+        if active:
+            bkg = apply_enhancement(bkg, active)
+    elif recorded != active:
+        raise IdtrackeraiError(
+            f"The background {path} was saved with different enhancement settings"
+            " than the ones in use, and an enhanced image cannot be converted. "
+            "Compute the background again or choose a raw image."
+        )
     return bkg
+
+
+_NO_RECORD = object()
+
+
+def _recorded_background_enhancement(path: str):
+    """What the sidecar next to a saved background says it was built with: the
+    settings, None for a raw image, or _NO_RECORD when there is no sidecar."""
+    try:
+        sidecar = Path(path).with_suffix(".enhancement.json")
+        return json.loads(sidecar.read_text(encoding="utf-8"))["enhancement"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return _NO_RECORD
 
 
 def check_background_shape(bkg: np.ndarray, example_video_path: Path | str) -> None:

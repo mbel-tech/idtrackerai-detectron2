@@ -28,6 +28,14 @@ def test_parse_release_rejects_garbage():
         parse_release("not-a-version")
 
 
+@pytest.fixture(autouse=True)
+def isolated_state_file(monkeypatch, tmp_path):
+    """Never read or write the state file inside the installed package."""
+    monkeypatch.setattr(
+        telemetry, "ANALYTICS_STATE_FILE_PATH", tmp_path / "optin.json"
+    )
+
+
 def test_analytics_off_by_default(monkeypatch):
     monkeypatch.delenv(telemetry.ANALYTICS_ENVIRON, raising=False)
     monkeypatch.delenv(telemetry.ANALYTICS_ENABLE_ENVIRON, raising=False)
@@ -35,6 +43,15 @@ def test_analytics_off_by_default(monkeypatch):
     with mock.patch.object(telemetry, "post") as post:
         telemetry.report_usage()
     post.assert_not_called()
+
+
+def test_analytics_opt_in_through_the_app_switch(monkeypatch):
+    monkeypatch.delenv(telemetry.ANALYTICS_ENVIRON, raising=False)
+    monkeypatch.delenv(telemetry.ANALYTICS_ENABLE_ENVIRON, raising=False)
+    telemetry.set_usage_analytics_state(True)
+    assert telemetry.get_usage_analytics_state() is True
+    telemetry.set_usage_analytics_state(False)
+    assert telemetry.get_usage_analytics_state() is False
 
 
 def test_analytics_opt_in_sends_only_command_name(monkeypatch):

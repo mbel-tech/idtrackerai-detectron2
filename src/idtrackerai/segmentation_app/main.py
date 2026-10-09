@@ -1,8 +1,10 @@
 # Each Qt binding is different, so...
 # pyright: reportIncompatibleMethodOverride=false
+import importlib.util
 import json
 import logging
 import numbers
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -382,6 +384,21 @@ class SegmentationGUI(GUIBase):
     def close_and_track_video(self):
         """Action when clicked "close and track video".
         It gathers widgets parameters, writes them in self.user_params and exits"""
+        if importlib.util.find_spec("torch") is None:
+            # tracking starts after this window closes, and it needs PyTorch.
+            # Without it the app would just vanish, with the reason only in the log
+            QMessageBox.critical(
+                self,
+                "PyTorch is not installed",
+                "Tracking needs PyTorch, which is missing from this environment."
+                " Install it, then try again:\n\n"
+                f'  "{sys.executable}" -m pip install torch torchvision\n\n'
+                "(add  --index-url https://download.pytorch.org/whl/cpu  for a"
+                " CPU-only build). Your settings are still here: use 'Save"
+                " parameters' to keep them.",
+            )
+            return
+
         parameters = self.out_parameters()
         if self.unacceptable_parameters(parameters):
             return
