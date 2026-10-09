@@ -178,9 +178,6 @@ def test_missing_keys_are_filled():
 # ------------------------------------------------------------- call sites
 import argparse
 import json
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from idtrackerai.base.animals_detection import segmentation
 from idtrackerai.extra_tools.detectron2_pipeline import sampling
@@ -267,12 +264,18 @@ def test_sampling_refuses_frames_enhanced_with_different_light_edits(tmp_path):
     sampling.check_enhancement_unchanged(same, dict(fp.DEFAULT_SETTINGS))
 
 
-def test_preview_uses_the_shared_function():
-    from qtpy.QtGui import QGuiApplication, QImage
+def test_preview_uses_the_shared_function(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    try:  # a missing libEGL/libGL raises a plain ImportError, so no importorskip
+        from qtpy.QtGui import QGuiApplication, QImage
 
-    from idtrackerai.segmentation_app.widgets.enhancement_preview import EnhancementPreview
+        from idtrackerai.segmentation_app.widgets.enhancement_preview import (
+            EnhancementPreview,
+        )
 
-    app = QGuiApplication.instance() or QGuiApplication([])  # noqa: F841
+        app = QGuiApplication.instance() or QGuiApplication([])  # noqa: F841
+    except ImportError as exc:
+        pytest.skip(f"Qt or its platform libraries (libEGL/libGL) unavailable: {exc}")
     settings = {**fp.DEFAULT_SETTINGS, "exposure": 1.0}
     preview = EnhancementPreview()
     preview.set_settings(settings)
