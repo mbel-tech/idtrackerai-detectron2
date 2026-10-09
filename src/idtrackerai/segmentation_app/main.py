@@ -560,6 +560,10 @@ def toml_format(value: Any, width: int = 50) -> str:
         return repr(value)
     if value is None:
         return '""'
+    if isinstance(value, dict):
+        # list(dict) would keep only the keys and silently lose the values
+        items = ", ".join(f"{k} = {toml_format(v)}" for k, v in value.items())
+        return "{ " + items + " }" if items else "{}"
     if not value:
         return "[]"
     value = list(value)

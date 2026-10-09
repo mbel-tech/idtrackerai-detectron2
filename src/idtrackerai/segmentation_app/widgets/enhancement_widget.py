@@ -195,6 +195,9 @@ class EnhancementWidget(QWidget):
         }
 
     def setSettings(self, settings: dict | None) -> None:
+        if not isinstance(settings, dict):
+            # a .toml saved by an older build holds only the setting names
+            settings = None
         merged = {**fp.DEFAULT_SETTINGS, **(settings or {})}
         name = CUSTOM
         for preset_name, preset in PRESETS.items():
