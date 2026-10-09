@@ -173,3 +173,113 @@ def test_missing_keys_are_filled():
     a = fp.enhance_with_settings(_rng_frame, {"clahe_clip": 2.0})
     b = fp.enhance_with_settings(_rng_frame, {**fp.DEFAULT_SETTINGS, "clahe_clip": 2.0})
     assert np.array_equal(a, b)
+
+
+# ------------------------------------------------------------- call sites
+import argparse
+import json
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from idtrackerai.base.animals_detection import segmentation
+from idtrackerai.extra_tools.detectron2_pipeline import sampling
+from idtrackerai.extra_tools.detectron2_pipeline.errors import (
+    PreprocessingError,
+    SamplingError,
+)
+
+_OLD_KEYS = (
+    "enhance",
+    "clahe_clip",
+    "clahe_tile",
+    "illumination_sigma",
+    "illumination_downsample",
+    "correct_lighting",
+)
+
+
+def test_all_call_sites_agree():
+    variants = [
+        {"clahe_clip": 2.0, "exposure": 0.7, "shadows": 30, "sharpness": 40, "denoise": 3},
+        {"clahe_clip": 2.0, "exposure": 0.7, "gamma": 1.4, "correct_lighting": True,
+         "illumination_downsample": 2, "illumination_sigma": 10.0},
+        {"clahe_clip": 3.0, "blacks": 20, "correct_lighting": False,
+         "illumination_downsample": 8, "illumination_sigma": 40.0},
+    ]
+    for extra in variants:
+        settings = {**fp.DEFAULT_SETTINGS, **extra}
+        want = fp.enhance_with_settings(_rng_frame, settings)
+        assert np.array_equal(segmentation.apply_enhancement(_rng_frame, settings), want)
+        assert np.array_equal(fp.make_enhancer_from(settings)(_rng_frame)[:, :, 0], want)
+
+
+def _parse(argv):
+    parser = argparse.ArgumentParser()
+    fp.add_arguments(parser)
+    return parser.parse_args(argv)
+
+
+def test_cli_flags_reach_the_settings():
+    settings = fp.resolve_settings(_parse(["--exposure", "0.5", "--gamma", "1.4"]))[0]
+    assert settings["exposure"] == 0.5 and settings["gamma"] == 1.4
+    assert settings["shadows"] == 0
+    assert fp.resolve_settings(_parse([]))[0] == fp.DEFAULT_SETTINGS
+
+
+def test_cli_flag_out_of_range_is_rejected():
+    with pytest.raises(PreprocessingError):
+        fp.resolve_settings(_parse(["--denoise", "50"]))
+
+
+def test_profile_round_trip_with_light_edits(tmp_path):
+    settings = {**fp.DEFAULT_SETTINGS, "exposure": 0.5, "gamma": 1.4, "shadows": 30, "denoise": 3}
+    path = fp.save_profile(tmp_path / "p.json", settings)
+    assert fp.load_profile(path) == settings
+
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps({k: fp.DEFAULT_SETTINGS[k] for k in _OLD_KEYS}))
+    assert fp.normalize_settings(fp.load_profile(old)) == fp.DEFAULT_SETTINGS
+
+
+def _record(folder, **overrides):
+    folder.mkdir(exist_ok=True)
+    settings = {**fp.DEFAULT_SETTINGS, **overrides}
+    (folder / "preprocess_profile.json").write_text(json.dumps(settings))
+
+
+def test_sampling_refuses_frames_enhanced_with_different_light_edits(tmp_path):
+    _record(tmp_path, exposure=0.5)
+    with pytest.raises(SamplingError):
+        sampling.check_enhancement_unchanged(tmp_path, {**fp.DEFAULT_SETTINGS, "exposure": 1.0})
+
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "preprocess_profile.json").write_text(
+        json.dumps({k: fp.DEFAULT_SETTINGS[k] for k in _OLD_KEYS})
+    )
+    with pytest.raises(SamplingError):
+        sampling.check_enhancement_unchanged(old, {**fp.DEFAULT_SETTINGS, "exposure": 1.0})
+    sampling.check_enhancement_unchanged(old, dict(fp.DEFAULT_SETTINGS))
+
+    same = tmp_path / "same"
+    _record(same)
+    sampling.check_enhancement_unchanged(same, dict(fp.DEFAULT_SETTINGS))
+
+
+def test_preview_uses_the_shared_function():
+    from qtpy.QtGui import QGuiApplication, QImage
+
+    from idtrackerai.segmentation_app.widgets.enhancement_preview import EnhancementPreview
+
+    app = QGuiApplication.instance() or QGuiApplication([])  # noqa: F841
+    settings = {**fp.DEFAULT_SETTINGS, "exposure": 1.0}
+    preview = EnhancementPreview()
+    preview.set_settings(settings)
+    preview._ensure_pixmap(0, _rng_frame)
+    image = preview._pixmap.toImage().convertToFormat(QImage.Format.Format_Grayscale8)
+    h, w = _rng_frame.shape
+    bits = image.constBits()
+    bits.setsize(image.sizeInBytes())
+    got = np.frombuffer(bits, np.uint8).reshape(h, image.bytesPerLine())[:, :w]
+    assert np.array_equal(got, fp.enhance_with_settings(_rng_frame, settings))

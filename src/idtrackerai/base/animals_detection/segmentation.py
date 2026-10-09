@@ -179,14 +179,7 @@ def apply_enhancement(frame: np.ndarray, enhancement: dict) -> np.ndarray:
     all three agree on what the image looks like.
     """
     enhancement = normalize_enhancement(enhancement)
-    return fp.enhance(
-        frame,
-        clahe_clip=enhancement["clahe_clip"],
-        clahe_tile=enhancement["clahe_tile"],
-        downsample=enhancement["illumination_downsample"],
-        sigma=enhancement["illumination_sigma"],
-        correct_lighting=enhancement["correct_lighting"],
-    )
+    return fp.enhance_with_settings(frame, enhancement)
 
 
 def process_frame(

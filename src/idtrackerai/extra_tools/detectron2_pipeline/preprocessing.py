@@ -372,6 +372,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="apply CLAHE only, leaving uneven lighting in place",
     )
+    for key, (low, high) in LIGHT_EDIT_RANGES.items():
+        group.add_argument(
+            f"--{key}",
+            type=float,
+            default=None,
+            help=f"light edit, from {low:g} to {high:g} (default: {DEFAULT_SETTINGS[key]:g})",
+        )
 
 
 def _explicit_from_args(args) -> dict:
@@ -382,6 +389,7 @@ def _explicit_from_args(args) -> dict:
         ("clahe_tile", "clahe_tile"),
         ("illumination_sigma", "illumination_sigma"),
         ("illumination_downsample", "illumination_downsample"),
+        *((key, key) for key in LIGHT_EDIT_RANGES),
     ):
         value = getattr(args, flag, None)
         if value is not None:
@@ -431,7 +439,7 @@ def resolve_settings(args, fallback: dict | None = None, fallback_label: str = "
 
     if not settings["enhance"]:
         notes.append("enhancement is OFF; raw frames are used")
-    return settings, notes
+    return normalize_settings(settings), notes
 
 
 def settings_from_args(args) -> dict:
@@ -448,14 +456,7 @@ def make_enhancer_from(settings: dict):
         )
 
     def enhancer(frame: np.ndarray) -> np.ndarray:
-        return for_detectron2(
-            frame,
-            clahe_clip=settings["clahe_clip"],
-            clahe_tile=settings["clahe_tile"],
-            downsample=settings["illumination_downsample"],
-            sigma=settings["illumination_sigma"],
-            correct_lighting=settings["correct_lighting"],
-        )
+        return cv2.cvtColor(enhance_with_settings(frame, settings), cv2.COLOR_GRAY2BGR)
 
     return enhancer
 
@@ -547,16 +548,8 @@ def _demo():
 
     gray = to_gray(frame)
     if settings["enhance"]:
-        lit = (
-            correct_illumination(
-                gray, settings["illumination_downsample"], settings["illumination_sigma"]
-            )
-            if settings["correct_lighting"]
-            else gray
-        )
-        final = apply_clahe(lit, settings["clahe_clip"], settings["clahe_tile"])
-        strip = np.hstack([gray, lit, final])
-        caption = "grayscale | illumination-corrected | + CLAHE"
+        strip = np.hstack([gray, enhance_with_settings(frame, settings)])
+        caption = "grayscale | enhanced"
     else:
         strip = gray
         caption = "grayscale only (enhancement off)"
