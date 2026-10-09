@@ -26,7 +26,7 @@
 
 - NaN or infinite values in a profile or flag (JSON allows `NaN`): rejected with `PreprocessingError`, not passed on to the lookup table.
 - `true`/`false` given for a numeric key: rejected, as the existing keys already do.
-- Extreme levels (`blacks` 100 with `whites` -100) would make the black point meet the white point: the table must stay finite and monotonic, not divide by zero.
+- Extreme levels (`blacks` -100 with `whites` 100) would make the black point meet the white point: the table must stay finite and monotonic, not divide by zero.
 - A model trained before this change, run with light edits on: `check_settings_match` must warn instead of staying silent.
 - Slider float round-off (`3 * 0.1`): a slider reset must give exactly the default, or a no-change Custom never matches a preset and profiles differ by `1e-17`.
 
@@ -90,7 +90,7 @@
   - `test_default_lut_is_identity`: `tone_lut(0, 0, 0, 1.0, 0, 0, 0, 0)` equals `np.arange(256)`.
   - `test_each_control_moves_the_ramp_the_right_way` (parametrized `(kwarg, value, mid_sample_should_be)`): applying `tone_lut` at index 128: `exposure=1` raises it, `exposure=-1` lowers it, `brightness=50` raises, `brightness=-50` lowers, `gamma=2.0` raises, `gamma=0.5` lowers, `contrast=100` leaves 128 within 1 of itself but maps index 192 higher and 64 lower, `contrast=-100` maps everything to within 1 of 128, `shadows=100` raises index 32 and leaves index 200 unchanged, `highlights=-100` lowers index 224 and leaves index 32 unchanged, `blacks=-50` maps index 20 to 0 (crushed) and `blacks=50` lifts index 0 above 0, `whites=50` maps index 230 to 255.
   - `test_lut_is_monotonic_for_any_in_range_combination`: over a grid of the extremes and 0 for all eight tone settings (`itertools.product`), `np.all(np.diff(lut.astype(int)) >= 0)`.
-  - `test_extreme_levels_stay_finite`: `tone_lut(blacks=100, whites=-100, ...)` has no exception, dtype uint8, monotonic.
+  - `test_extreme_levels_stay_finite`: for all four corners of `blacks` and `whites` in (-100, 100), including `blacks=-100, whites=100` where the black point meets the white point, `tone_lut(...)` has no exception, dtype uint8, shape (256,), monotonic.
   - `test_denoise_reduces_noise_and_sharpen_increases_edges`: on a flat 100 frame plus Gaussian noise (seeded), `denoise(f, 8).std() < f.std()`; on a step-edge frame, `sharpen(f, 100)` has larger max gradient than `f`.
   - `test_zero_strength_returns_the_input_values`: `denoise(f, 0)` and `sharpen(f, 0)` equal `f`.
   - `test_tiny_and_flat_frames_do_not_raise`: `enhance_with_settings` on a `4x4` frame and a constant frame, with every light edit at its max, returns uint8 of the same shape.

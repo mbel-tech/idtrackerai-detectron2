@@ -243,7 +243,7 @@ to open the individual sliders, in four collapsible groups:
   tile size.
 - **Evenness** — lighting evenness.
 
-Light, Detail and Evenness start open. Double-click any slider to return it to
+All four groups start open, and each remembers whether you collapsed it. Double-click any slider to return it to
 its default, or press **Reset all** to put every slider back.
 
 A few things worth knowing:
