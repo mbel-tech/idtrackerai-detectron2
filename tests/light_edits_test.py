@@ -155,12 +155,17 @@ def test_lut_is_monotonic_for_any_in_range_combination():
         assert np.all(np.diff(lut.astype(int)) >= 0), dict(zip(names, combo))
 
 
-def test_extreme_levels_stay_finite():
-    # the black point meets the white point: the guard keeps it finite
-    for kwargs in ({"blacks": -100, "whites": 100}, {"blacks": 100, "whites": -100}):
-        lut = _lut(**kwargs)
-        assert lut.dtype == np.uint8 and lut.shape == (256,)
-        assert np.all(np.diff(lut.astype(int)) >= 0)
+@pytest.mark.parametrize("blacks", [-100, 100])
+@pytest.mark.parametrize("whites", [-100, 100])
+def test_extreme_levels_stay_finite(blacks, whites):
+    # all four corners; blacks=-100 with whites=100 is where the black point
+    # meets the white point and the minimum-gap guard keeps the table finite
+    lut = _lut(blacks=blacks, whites=whites)
+    assert lut.dtype == np.uint8 and lut.shape == (256,)
+    assert np.all(np.diff(lut.astype(int)) >= 0)
+    if (blacks, whites) == (-100, 100):
+        assert lut[0] == 0 and lut[-1] == 255
+        assert len(np.unique(lut)) > 1
 
 
 def test_positive_blacks_lifts_and_stays_monotonic():

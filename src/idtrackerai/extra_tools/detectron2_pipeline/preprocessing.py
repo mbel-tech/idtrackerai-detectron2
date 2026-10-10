@@ -44,8 +44,10 @@ import numpy as np
 try:
     from .errors import PreprocessingError
 except ImportError:  # loaded by path, e.g. from a Colab bundle with no package
+
     class PreprocessingError(Exception):  # type: ignore[no-redef]
         """A profile could not be read or made sense of."""
+
 
 # Starting point, not a recommendation. Override per setup with a profile.
 CLAHE_CLIP_LIMIT = 1.5
@@ -156,7 +158,11 @@ def correct_illumination(
     """
     if downsample > 1:
         small = cv2.resize(
-            gray, None, fx=1 / downsample, fy=1 / downsample, interpolation=cv2.INTER_AREA
+            gray,
+            None,
+            fx=1 / downsample,
+            fy=1 / downsample,
+            interpolation=cv2.INTER_AREA,
         )
     else:
         small = gray
@@ -207,7 +213,9 @@ def tone_lut(
     # Shadow/highlight bumps. 0.25 is the largest amplitude that keeps the
     # curve monotonic.
     x = np.clip(x + 0.25 * shadows / 100 * np.where(x < 0.5, (1 - 2 * x) ** 2, 0), 0, 1)
-    x = np.clip(x + 0.25 * highlights / 100 * np.where(x > 0.5, (2 * x - 1) ** 2, 0), 0, 1)
+    x = np.clip(
+        x + 0.25 * highlights / 100 * np.where(x > 0.5, (2 * x - 1) ** 2, 0), 0, 1
+    )
     x = np.clip(0.5 + (x - 0.5) * (1 + contrast / 100), 0, 1)
     x = np.clip(x + brightness / 100, 0, 1)
 
@@ -304,10 +312,14 @@ def load_profile(path: Path | str) -> dict:
     except FileNotFoundError:
         raise PreprocessingError(f"Preprocessing profile not found: {path}")
     except json.JSONDecodeError as exc:
-        raise PreprocessingError(f"Preprocessing profile {path} is not valid JSON: {exc}")
+        raise PreprocessingError(
+            f"Preprocessing profile {path} is not valid JSON: {exc}"
+        )
 
     if not isinstance(data, dict):
-        raise PreprocessingError(f"Preprocessing profile {path} must contain a JSON object")
+        raise PreprocessingError(
+            f"Preprocessing profile {path} must contain a JSON object"
+        )
 
     settings = data.get("enhancement", data)
     unknown = set(settings) - set(SETTING_KEYS) - {"name", "notes"}
@@ -319,7 +331,9 @@ def load_profile(path: Path | str) -> dict:
     return {k: v for k, v in settings.items() if k in SETTING_KEYS}
 
 
-def save_profile(path: Path | str, settings: dict, name: str = "", notes: str = "") -> Path:
+def save_profile(
+    path: Path | str, settings: dict, name: str = "", notes: str = ""
+) -> Path:
     """Writes a profile, so a setup's settings can be reused and version controlled."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -406,7 +420,9 @@ def _explicit_from_args(args) -> dict:
     return explicit
 
 
-def resolve_settings(args, fallback: dict | None = None, fallback_label: str = "") -> tuple[dict, list[str]]:
+def resolve_settings(
+    args, fallback: dict | None = None, fallback_label: str = ""
+) -> tuple[dict, list[str]]:
     """Layers flags over a profile over a fallback over the built-in defaults.
 
     Returns the settings and a list of human-readable notes describing where
@@ -488,7 +504,9 @@ def describe(settings: dict) -> str:
     return "; ".join(parts)
 
 
-def check_settings_match(recorded: dict | None, current: dict, label: str) -> str | None:
+def check_settings_match(
+    recorded: dict | None, current: dict, label: str
+) -> str | None:
     """Compares enhancement settings, returning a warning when they differ.
 
     Used to catch the case where a model trained on enhanced frames is later run

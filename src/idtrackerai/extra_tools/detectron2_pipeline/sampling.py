@@ -135,7 +135,9 @@ def uniform_indices(n_frames: int, n_take: int, rng: random.Random) -> list[int]
     return sorted(rng.sample(range(n_frames), n_take))
 
 
-def _fit_to_capacity(allocation: list[int], counts: Sequence[int], total: int) -> list[int]:
+def _fit_to_capacity(
+    allocation: list[int], counts: Sequence[int], total: int
+) -> list[int]:
     """No video is asked for more frames than it has, and nothing is lost.
 
     The shortfall goes round the remaining videos one frame at a time rather
@@ -346,8 +348,15 @@ def _merge_manifest(path: Path, manifest: dict, output: Path) -> dict:
         old_batches = [
             {
                 key: old[key]
-                for key in ("created", "seed", "sampling", "allocation",
-                            "complete", "enhancement", "videos")
+                for key in (
+                    "created",
+                    "seed",
+                    "sampling",
+                    "allocation",
+                    "complete",
+                    "enhancement",
+                    "videos",
+                )
                 if key in old
             }
         ]
