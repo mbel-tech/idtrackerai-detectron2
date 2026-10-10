@@ -84,6 +84,7 @@ def make_args(**overrides):
         backend="detectron2",
         prompt=None,
         weights="model_final.pth",
+        weights_sha256="0" * 64,
         score_threshold=0.7,
         max_instances=5,
         min_component=0,

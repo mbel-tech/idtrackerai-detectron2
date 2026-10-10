@@ -467,8 +467,8 @@ def export_video(
     cap = cv2.VideoCapture(str(local))
     try:
         return _export_opened_video(
-            cap, video, local, temporary_copy, output, args, predictor, config,
-            enhance, enhancement, write_contours, started,
+            cap, video, local, temporary_copy, output, args, predictor, model_description,
+            enhance, enhancement, write_contours, started, progress, abort,
         )
     finally:
         cap.release()
@@ -477,9 +477,9 @@ def export_video(
 
 
 def _export_opened_video(
-    cap, video, local, temporary_copy, output, args, predictor, config, enhance,
-    enhancement, write_contours, started,
-) -> dict:
+    cap, video, local, temporary_copy, output, args, predictor, model_description, enhance,
+    enhancement, write_contours, started, progress=None, abort=None,
+) -> dict | None:
     if not cap.isOpened():
         raise ExportError(f"Could not open {local}")
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))

@@ -87,9 +87,12 @@ def test_the_bundle_carries_what_the_notebook_looks_for(unpacked):
 
 
 def test_the_gpu_stages_travel_but_the_local_ones_do_not(unpacked):
-    """Sampling and dataset building happen before anything is uploaded."""
+    """Sampling happens before anything is uploaded.
+
+    dataset.py does travel: training imports it on the runtime.
+    """
     _, names = unpacked
-    assert not any("sampling" in n or "dataset" in n for n in names)
+    assert not any("sampling" in n for n in names)
 
 
 def test_the_scripts_find_each_other_once_unpacked(unpacked):
